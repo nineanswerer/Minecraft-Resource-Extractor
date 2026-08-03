@@ -33,7 +33,11 @@ function checkArgs() {
 		msg "${RED}Please provide the path to your .minecraft directory and optionally the path to the Java 'jar' binary.\n${YELLOW}Usage : ./mre.sh [.minecraft path] [path to jar executable]\n"
 		exit 1
 	fi
-	if [ "${#}" -eq 2 ]; then
+	if [[ "${1}" =~ \.jar$ ]]; then
+              EXTRACTING_MC=0
+              JAR_PATH="${1}"
+	fi
+        if [ "${#}" -eq 2 ]; then
 		JAR_CMD="${2}"
 	else
 		JAR_CMD="jar"
