@@ -24,6 +24,33 @@ namespace mre.controller
 			settings = Settings.GetInstance();
 		}
 
+		public void SetCustomMcPath(string path)
+		{
+			target = new Minecraft();
+			((Minecraft)target).McPath = path;
+			if (((Minecraft)target).FindMcVersions(path))
+			{
+				view.cmbVersions.Items.Clear();
+				foreach (var ver in ((Minecraft)target).Versions)
+				{
+					view.cmbVersions.Items.Add(ver);
+				}
+				view.Log("已找到 .minecraft 文件夹。请选择要提取资源的版本。");
+				StepsController.Step2(view);
+			}
+			else
+			{
+				MessageBox.Show(
+					"错误：未找到 versions 文件夹！\n\n" +
+					"请确保选择的文件夹是正确的 .minecraft 文件夹，且游戏至少启动过一次。",
+					"错误",
+					MessageBoxButtons.OK,
+					MessageBoxIcon.Error
+				);
+				view.Log("未找到正确的文件夹，请确保选择的 .minecraft 文件夹正确且游戏至少启动过一次。", "DarkRed");
+			}
+		}
+
 		public string GetJavaPath()
 		{
 			return settings.JavaPath;
@@ -45,15 +72,15 @@ namespace mre.controller
 				{
 					view.cmbVersions.Items.Add(ver);
 				}
-				view.Log("Please choose the version you wish to extract resources from.");
+				view.Log("请选择要提取资源的版本。");
 				StepsController.Step2(view);
 			}
 			else
 			{
-				view.Log("Your .minecraft folder was not located automatically. Please provide the path to your .minecraft folder.", "DarkRed");
+				view.Log("无法自动定位您的 .minecraft 文件夹。请手动提供路径。", "DarkRed");
 				FolderBrowserDialog browse = new FolderBrowserDialog
 				{
-					Description = "Locate your .minecraft folder"
+					Description = "请选择您的 .minecraft 文件夹"
 				};
 				if (browse.ShowDialog() == DialogResult.OK)
 				{
@@ -65,20 +92,20 @@ namespace mre.controller
 						{
 							view.cmbVersions.Items.Add(ver);
 						}
-						view.Log("Correctly located .minecraft folder. Please choose the version you wish to extract resources from.");
+						view.Log("已成功定位 .minecraft 文件夹。请选择要提取资源的版本。");
 						StepsController.Step2(view);
 					}
 					else
 					{
 						MessageBox.Show(
-							"ERROR : Your versions folder could not be found !\n\n" +
-							"Make sure you selected the correct folder or launched the game at least once.\n\n" +
-							"Your .minecraft folder should be located at \"C:\\Users\\YourName\\AppData\\Roaming\\.minecraft\"",
-							"Error",
+							"错误：未找到 versions 文件夹！\n\n" +
+							"请确保您选择了正确的文件夹，且游戏至少启动过一次。\n\n" +
+							"您的 .minecraft 文件夹通常位于 \"C:\\Users\\您的用户名\\AppData\\Roaming\\.minecraft\"",
+							"错误",
 							MessageBoxButtons.OK,
 							MessageBoxIcon.Error
 						);
-						view.Log("You seem to have not provided the correct folder, make sure you selected the .minecraft folder and that you launched the game at least once.", "DarkRed");
+						view.Log("您似乎没有提供正确的文件夹，请确保选择了 .minecraft 文件夹且游戏至少启动过一次。", "DarkRed");
 					}
 				}
 			}
@@ -89,8 +116,8 @@ namespace mre.controller
 			target = new Target();
 			OpenFileDialog browse = new OpenFileDialog
 			{
-				Filter = "Jar files (*.jar)|*.jar",
-				Title = "Locate a .jar file"
+				Filter = "Jar 文件 (*.jar)|*.jar",
+				Title = "请选择一个 .jar 文件"
 			};
 			if (browse.ShowDialog() == DialogResult.OK)
 			{
@@ -98,7 +125,7 @@ namespace mre.controller
 				view.txtPath.Text = browse.FileName;
 				view.FillCheckedBox(view.chkExtFolders, target.Jar.ListJarFolders(settings.JavaPath, view));
 				view.SetCheckAll(view.chkExtFolders, true);
-				view.Log("Jar folders found, please choose the folders you would like to extract.");
+				view.Log("已找到 jar 文件夹，请选择您想要提取的文件夹。");
 				StepsController.Step4(view);
 			}
 		}
@@ -122,14 +149,14 @@ namespace mre.controller
 				string jsonString = File.ReadAllText(jsonPath);
 				string jarUrl = (string)JObject.Parse(jsonString).SelectToken("downloads.client.url");
 				target.Jar.Path = settings.MreDirPath + "\\mre-tmp\\" + target.Jar.FullName;
-				view.Log("Version " + ((Minecraft)target).TargetVersion + " jar file was not found. Downloading it now...");
+				view.Log("未找到版本 " + ((Minecraft)target).TargetVersion + " 的 jar 文件。正在下载...");
 				StartDownload(jarUrl, target.Jar.Path, JarDownloadCompleteEvent);
 			}
 			else
 			{
 				view.FillCheckedBox(view.chkExtFolders, GetJarFolders());
 				view.SetCheckAll(view.chkExtFolders, true);
-				view.Log("Jar folders found, please choose the folders you would like to extract.");
+				view.Log("已找到 jar 文件夹，请选择您想要提取的文件夹。");
 				StepsController.Step4(view);
 			}
 		}
@@ -154,7 +181,7 @@ namespace mre.controller
 				double bytesIn = double.Parse(e.BytesReceived.ToString());
 				double totalBytes = double.Parse(e.TotalBytesToReceive.ToString());
 				double percentage = bytesIn / totalBytes * 100;
-				view.Status("Downloading " + e.BytesReceived / 1000 + "/" + e.TotalBytesToReceive / 1000 + " KB");
+				view.Status("正在下载 " + e.BytesReceived / 1000 + "/" + e.TotalBytesToReceive / 1000 + " KB");
 				view.pgbProgress.Value = int.Parse(Math.Truncate(percentage).ToString());
 			});
 		}
@@ -163,10 +190,10 @@ namespace mre.controller
 		{
 			view.BeginInvoke((MethodInvoker)delegate
 			{
-				view.Log("Jar file downloaded.");
+				view.Log("Jar 文件下载完成。");
 				view.FillCheckedBox(view.chkExtFolders, GetJarFolders());
 				view.SetCheckAll(view.chkExtFolders, true);
-				view.Log("Jar folders found, please choose the folders you would like to extract.");
+				view.Log("已找到 jar 文件夹，请选择您想要提取的文件夹。");
 				StepsController.Step4(view);
 			});
 		}
@@ -175,8 +202,8 @@ namespace mre.controller
 		{
 			view.BeginInvoke((MethodInvoker)delegate
 			{
-				view.Status("Completed");
-				view.Log("Index file downloaded.");
+				view.Status("完成");
+				view.Log("索引文件下载完成。");
 				ReadAssets();
 				MoveAssets();
 			});
@@ -184,11 +211,11 @@ namespace mre.controller
 
 		public void ExtractJarFolder(string folder)
 		{
-			view.Status("Extracting folder " + folder + " from jar...");
+			view.Status("正在从 jar 中提取文件夹 " + folder + " ...");
 			view.SwitchUiLock(4);
 			target.Jar.ExtractJarFolder(folder, settings);
 			view.SwitchUiLock(4);
-			view.Status("Jar Extracted");
+			view.Status("Jar 提取完成");
 		}
 
 		public void GetAssets()
@@ -197,7 +224,7 @@ namespace mre.controller
 			assetsTarget.AssetsFiles = new Assets();
 			if (!assetsTarget.AssetsFiles.FindAssetsIndex(assetsTarget.TargetVersion, assetsTarget.McPath))
 			{
-				view.Log("The index file was not found, it will be downloaded but this means that some files may be missing ! You should launch this version first to ensure you have all the needed files.", "DarkRed");
+				view.Log("未找到索引文件，将会下载，但这意味着某些文件可能会缺失！您应该先启动一次这个版本以确保您有所需的全部文件。", "DarkRed");
 				if (!Directory.Exists(settings.MreDirPath + "\\mre-tmp"))
 					Directory.CreateDirectory(settings.MreDirPath + "\\mre-tmp");
 				string jsonPath = assetsTarget.McPath + "\\versions\\" + assetsTarget.TargetVersion + "\\" + assetsTarget.TargetVersion + ".json";
@@ -228,7 +255,7 @@ namespace mre.controller
 		{
 			Minecraft mc = (Minecraft)target;
 			int missingFiles = 0;
-			view.Log("Starting assets extraction, this can take a while, please be patient...");
+			view.Log("开始提取资源文件，这可能需要一些时间，请耐心等待...");
 			foreach (var obj in mc.AssetsFiles.Hashes)
 			{
 				string folder = obj.Value.Substring(0, 2);
@@ -245,11 +272,11 @@ namespace mre.controller
 				}
 			}
 			if (missingFiles > 0)
-				view.Log("Successfully copied " + (mc.AssetsFiles.Hashes.Count - missingFiles) + " assets with " + missingFiles + " missing files !", "DarkRed");
+				view.Log("成功复制 " + (mc.AssetsFiles.Hashes.Count - missingFiles) + " 个资源文件，但有 " + missingFiles + " 个文件缺失！", "DarkRed");
 			else
-				view.Log("Successfully copied " + (mc.AssetsFiles.Hashes.Count - missingFiles) + " assets ! Your files are located in the \"mre-output\" folder.", "DarkGreen");
-			view.Status("Job completed !");
-			view.Log("Thank you for using the Minecraft Resource Extractor made by Julien Kerboeuf !", "DarkGreen");
+				view.Log("成功复制 " + (mc.AssetsFiles.Hashes.Count - missingFiles) + " 个资源文件！您的文件位于 \"mre-output\" 文件夹中。", "DarkGreen");
+			view.Status("操作完成！");
+			view.Log("感谢您使用 Minecraft 资源提取器！", "DarkGreen");
 			Process.Start("explorer.exe", settings.MreDirPath + "\\mre-output");
 		}
 	}

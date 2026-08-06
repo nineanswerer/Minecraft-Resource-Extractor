@@ -41,7 +41,7 @@
 			this.btnBrowseJar.Name = "btnBrowseJar";
 			this.btnBrowseJar.Size = new System.Drawing.Size(73, 23);
 			this.btnBrowseJar.TabIndex = 0;
-			this.btnBrowseJar.Text = "Browse...";
+			this.btnBrowseJar.Text = "浏览...";
 			this.btnBrowseJar.UseVisualStyleBackColor = true;
 			this.btnBrowseJar.Click += new System.EventHandler(this.btnBrowseJar_Click);
 			// 
@@ -60,9 +60,7 @@
 			this.label1.Name = "label1";
 			this.label1.Size = new System.Drawing.Size(324, 39);
 			this.label1.TabIndex = 2;
-			this.label1.Text = "Java\'s jar.exe could not be found automatically.\r\nPlease install Java JDK first i" +
-    "n order to use this tool.\r\nIf you have a custom path to a Java JDK, you can prov" +
-    "ide it below.";
+			this.label1.Text = "无法自动找到 Java 的 jar.exe。\r\n请先安装 Java JDK 以使用此工具。\r\n如果您有自定义的 Java JDK 路径，可以在下面提供。";
 			// 
 			// btnJarPathOk
 			// 
@@ -72,7 +70,7 @@
 			this.btnJarPathOk.Name = "btnJarPathOk";
 			this.btnJarPathOk.Size = new System.Drawing.Size(75, 23);
 			this.btnJarPathOk.TabIndex = 3;
-			this.btnJarPathOk.Text = "Ok";
+			this.btnJarPathOk.Text = "确定";
 			this.btnJarPathOk.UseVisualStyleBackColor = true;
 			this.btnJarPathOk.Click += new System.EventHandler(this.btnJarPathOk_Click);
 			// 
@@ -83,7 +81,7 @@
 			this.btnJarPathCancel.Name = "btnJarPathCancel";
 			this.btnJarPathCancel.Size = new System.Drawing.Size(75, 23);
 			this.btnJarPathCancel.TabIndex = 4;
-			this.btnJarPathCancel.Text = "Cancel";
+			this.btnJarPathCancel.Text = "取消";
 			this.btnJarPathCancel.UseVisualStyleBackColor = true;
 			// 
 			// FrmJarPathPrompt
@@ -105,7 +103,7 @@
 			this.ShowInTaskbar = false;
 			this.SizeGripStyle = System.Windows.Forms.SizeGripStyle.Hide;
 			this.StartPosition = System.Windows.Forms.FormStartPosition.CenterParent;
-			this.Text = "Locate jar.exe";
+			this.Text = "定位 jar.exe";
 			this.ResumeLayout(false);
 			this.PerformLayout();
 

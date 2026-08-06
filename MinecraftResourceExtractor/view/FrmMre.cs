@@ -18,13 +18,13 @@ namespace mre.view
 			controller = new Controller(this);
 			if (controller.GetJavaPath() == null)
 			{
-				MessageBox.Show("ERROR\nYou need to install Java JDK first in order to use this tool", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+				MessageBox.Show("错误\n您需要先安装 Java JDK 才能使用此工具", "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
 				Load += (s, e) => Close();
 				return;
 			}
-			Log("Welcome to the Minecraft Resource Extractor !");
+			Log("欢迎使用 Minecraft 资源提取器！");
 			StepsController.Step1(this);
-			Log("Select if you would want to extract resources from an official Minecraft version or an individual jar file.");
+			Log("请选择是要从官方 Minecraft 版本提取资源，还是从单独的 jar 文件提取。");
 		}
 
 		public void Log(string msg, string color = "Black")
@@ -70,12 +70,12 @@ namespace mre.view
 			if (rdbExMinecraft.Checked)
 			{
 				rdbExJar.Checked = false;
-				btnLocateJar.Text = "Locate...";
+				btnLocateJar.Text = "定位...";
 			}
 			else
 			{
 				rdbExMinecraft.Checked = false;
-				btnLocateJar.Text = "Browse...";
+				btnLocateJar.Text = "浏览...";
 			}
 			StepsController.Step1(this);
 		}
@@ -83,6 +83,19 @@ namespace mre.view
 		private void RdbExMinecraft_CheckedChanged(object sender, EventArgs e)
 		{
 			SwitchExtractionType();
+		}
+
+		private void BtnBrowse_Click(object sender, EventArgs e)
+		{
+			FolderBrowserDialog browse = new FolderBrowserDialog
+			{
+				Description = "选择 .minecraft 文件夹"
+			};
+			if (browse.ShowDialog() == DialogResult.OK)
+			{
+				txtPath.Text = browse.SelectedPath;
+				controller.SetCustomMcPath(browse.SelectedPath);
+			}
 		}
 
 		private void BtnLocateJar_Click(object sender, EventArgs e)
@@ -115,7 +128,7 @@ namespace mre.view
 			{
 				controller.GetAssets();
 				Status("Job completed !");
-				Log("Thank you for using the Minecraft Resource Extractor made by Julien Kerboeuf !", "DarkGreen");
+				Log("感谢您使用 Minecraft 资源提取器！", "DarkGreen");
 				Process.Start("explorer.exe", controller.settings.MreDirPath + "\\mre-output");
 			}
 		}
@@ -124,7 +137,7 @@ namespace mre.view
 		{
 			if (rdbExJar.Checked || chkExtGroups.GetItemChecked(0))
 			{
-				Log("Sarting jar extraction, this can take a while, please be patient...");
+				Log("正在开始 jar 提取，这可能需要一些时间，请耐心等待...");
 				for (int i = 0; i < chkExtFolders.Items.Count; i++)
 				{
 					if (chkExtFolders.GetItemChecked(i))
@@ -132,7 +145,7 @@ namespace mre.view
 						controller.ExtractJarFolder(chkExtFolders.Items[i].ToString());
 					}
 				}
-				Log("Successfully extracted content from jar file ! Your files are located in the \"mre-output\" folder.", "DarkGreen");
+				Log("成功从 jar 文件中提取内容！您的文件位于 \"mre-output\" 文件夹中。", "DarkGreen");
 			}
 			if (!rdbExJar.Checked && chkExtGroups.GetItemChecked(1))
 			{

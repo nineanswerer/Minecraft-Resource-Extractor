@@ -24,8 +24,8 @@ namespace mre.view
 		{
 			using (var dialog = new OpenFileDialog())
 			{
-				dialog.Title = "Select jar.exe";
-				dialog.Filter = "jar.exe (jar.exe)|jar.exe|Executable files (*.exe)|*.exe|All files (*.*)|*.*";
+				dialog.Title = "选择 jar.exe";
+				dialog.Filter = "jar.exe (jar.exe)|jar.exe|可执行文件 (*.exe)|*.exe|所有文件 (*.*)|*.*";
 				dialog.CheckFileExists = true;
 				dialog.FileName = "jar.exe";
 				dialog.Multiselect = false;
@@ -43,7 +43,7 @@ namespace mre.view
 			var p = txtJarPath.Text;
 			if (string.IsNullOrWhiteSpace(p) || !File.Exists(p))
 			{
-				MessageBox.Show(this, "The selected file doesn't exist.", "Invalid path", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+				MessageBox.Show(this, "所选文件不存在。", "无效路径", MessageBoxButtons.OK, MessageBoxIcon.Warning);
 				DialogResult = DialogResult.None;
 				return;
 			}
@@ -51,7 +51,7 @@ namespace mre.view
 			// Ensure user actually selected jar.exe (case-insensitive)
 			if (!string.Equals(Path.GetFileName(p), "jar.exe", StringComparison.OrdinalIgnoreCase))
 			{
-				var res = MessageBox.Show(this, "The selected file is not named 'jar.exe'. Are you sure you want to use it?", "Confirm", MessageBoxButtons.YesNo, MessageBoxIcon.Question);
+				var res = MessageBox.Show(this, "所选文件不名为 'jar.exe'。您确定要使用它吗？", "确认", MessageBoxButtons.YesNo, MessageBoxIcon.Question);
 				if (res == DialogResult.No)
 				{
 					DialogResult = DialogResult.None;

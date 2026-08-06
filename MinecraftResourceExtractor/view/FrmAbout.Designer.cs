@@ -45,7 +45,7 @@
 			this.btnDonate.Name = "btnDonate";
 			this.btnDonate.Size = new System.Drawing.Size(75, 23);
 			this.btnDonate.TabIndex = 0;
-			this.btnDonate.Text = "Donate";
+			this.btnDonate.Text = "捐赠";
 			this.btnDonate.UseVisualStyleBackColor = true;
 			this.btnDonate.Click += new System.EventHandler(this.BtnDonate_Click);
 			// 
@@ -55,7 +55,7 @@
 			this.btnClose.Name = "btnClose";
 			this.btnClose.Size = new System.Drawing.Size(75, 23);
 			this.btnClose.TabIndex = 1;
-			this.btnClose.Text = "Close";
+			this.btnClose.Text = "关闭";
 			this.btnClose.UseVisualStyleBackColor = true;
 			this.btnClose.Click += new System.EventHandler(this.BtnClose_Click);
 			// 
@@ -65,7 +65,7 @@
 			this.btnWebsite.Name = "btnWebsite";
 			this.btnWebsite.Size = new System.Drawing.Size(75, 23);
 			this.btnWebsite.TabIndex = 2;
-			this.btnWebsite.Text = "Web Page";
+			this.btnWebsite.Text = "网页";
 			this.btnWebsite.UseVisualStyleBackColor = true;
 			this.btnWebsite.Click += new System.EventHandler(this.BtnWebsite_Click);
 			// 
@@ -77,7 +77,7 @@
 			this.lblTitre.Name = "lblTitre";
 			this.lblTitre.Size = new System.Drawing.Size(244, 20);
 			this.lblTitre.TabIndex = 4;
-			this.lblTitre.Text = "Minecraft Resource Extractor";
+			this.lblTitre.Text = "Minecraft 资源提取器";
 			// 
 			// picLogo
 			// 
@@ -106,7 +106,7 @@
 			this.lblCreator.Name = "lblCreator";
 			this.lblCreator.Size = new System.Drawing.Size(134, 13);
 			this.lblCreator.TabIndex = 7;
-			this.lblCreator.Text = "Created by Julien Kerboeuf";
+			this.lblCreator.Text = "作者：Julien Kerboeuf";
 			// 
 			// FrmAbout
 			// 
@@ -130,7 +130,7 @@
 			this.ShowInTaskbar = false;
 			this.SizeGripStyle = System.Windows.Forms.SizeGripStyle.Hide;
 			this.StartPosition = System.Windows.Forms.FormStartPosition.CenterParent;
-			this.Text = "About";
+			this.Text = "关于";
 			((System.ComponentModel.ISupportInitialize)(this.picLogo)).EndInit();
 			this.ResumeLayout(false);
 			this.PerformLayout();

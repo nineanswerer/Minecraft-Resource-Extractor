@@ -88,31 +88,40 @@
 			this.btnLocateJar.Name = "btnLocateJar";
 			this.btnLocateJar.Size = new System.Drawing.Size(115, 23);
 			this.btnLocateJar.TabIndex = 1;
-			this.btnLocateJar.Text = "Locate...";
+			this.btnLocateJar.Text = "定位...";
 			this.btnLocateJar.UseVisualStyleBackColor = true;
 			this.btnLocateJar.Click += new System.EventHandler(this.BtnLocateJar_Click);
 			// 
 			// txtPath
 			// 
-			this.txtPath.Enabled = false;
 			this.txtPath.Location = new System.Drawing.Point(6, 45);
 			this.txtPath.Name = "txtPath";
-			this.txtPath.RightToLeft = System.Windows.Forms.RightToLeft.Yes;
-			this.txtPath.Size = new System.Drawing.Size(350, 20);
+			this.txtPath.Size = new System.Drawing.Size(269, 20);
 			this.txtPath.TabIndex = 2;
+			//
+			// btnBrowse
+			//
+			this.btnBrowse.Location = new System.Drawing.Point(281, 44);
+			this.btnBrowse.Name = "btnBrowse";
+			this.btnBrowse.Size = new System.Drawing.Size(75, 23);
+			this.btnBrowse.TabIndex = 3;
+			this.btnBrowse.Text = "浏览...";
+			this.btnBrowse.UseVisualStyleBackColor = true;
+			this.btnBrowse.Click += new System.EventHandler(this.BtnBrowse_Click);
 			// 
 			// grbStep1
 			// 
 			this.grbStep1.Controls.Add(this.rdbExMinecraft);
 			this.grbStep1.Controls.Add(this.rdbExJar);
 			this.grbStep1.Controls.Add(this.txtPath);
+			this.grbStep1.Controls.Add(this.btnBrowse);
 			this.grbStep1.Controls.Add(this.btnLocateJar);
 			this.grbStep1.Location = new System.Drawing.Point(12, 12);
 			this.grbStep1.Name = "grbStep1";
 			this.grbStep1.Size = new System.Drawing.Size(362, 76);
 			this.grbStep1.TabIndex = 3;
 			this.grbStep1.TabStop = false;
-			this.grbStep1.Text = "Step 1 : locating Minecraft or jar";
+			this.grbStep1.Text = "步骤 1：定位 Minecraft";
 			// 
 			// rdbExMinecraft
 			// 
@@ -123,7 +132,7 @@
 			this.rdbExMinecraft.Size = new System.Drawing.Size(105, 17);
 			this.rdbExMinecraft.TabIndex = 4;
 			this.rdbExMinecraft.TabStop = true;
-			this.rdbExMinecraft.Text = "Extract Minecraft";
+			this.rdbExMinecraft.Text = "提取 Minecraft 资源";
 			this.rdbExMinecraft.UseVisualStyleBackColor = true;
 			this.rdbExMinecraft.CheckedChanged += new System.EventHandler(this.RdbExMinecraft_CheckedChanged);
 			// 
@@ -134,7 +143,7 @@
 			this.rdbExJar.Name = "rdbExJar";
 			this.rdbExJar.Size = new System.Drawing.Size(88, 17);
 			this.rdbExJar.TabIndex = 5;
-			this.rdbExJar.Text = "Extract jar file";
+			this.rdbExJar.Text = "从 jar 文件提取";
 			this.rdbExJar.UseVisualStyleBackColor = true;
 			// 
 			// lnkAbout
@@ -158,7 +167,7 @@
 			this.grbStep2.Size = new System.Drawing.Size(362, 51);
 			this.grbStep2.TabIndex = 7;
 			this.grbStep2.TabStop = false;
-			this.grbStep2.Text = "Step 2 : version to extract";
+			this.grbStep2.Text = "步骤 2：选择要提取的版本";
 			// 
 			// btnConfirm2
 			// 
@@ -166,7 +175,7 @@
 			this.btnConfirm2.Name = "btnConfirm2";
 			this.btnConfirm2.Size = new System.Drawing.Size(75, 23);
 			this.btnConfirm2.TabIndex = 1;
-			this.btnConfirm2.Text = "Confirm";
+			this.btnConfirm2.Text = "确认";
 			this.btnConfirm2.UseVisualStyleBackColor = true;
 			this.btnConfirm2.Click += new System.EventHandler(this.BtnConfirm2_Click);
 			// 
@@ -190,7 +199,7 @@
 			this.grbStep3.Size = new System.Drawing.Size(362, 62);
 			this.grbStep3.TabIndex = 8;
 			this.grbStep3.TabStop = false;
-			this.grbStep3.Text = "Step 3 : group(s) to extract";
+			this.grbStep3.Text = "步骤 3：选择要提取的分组";
 			// 
 			// btnConfirm3
 			// 
@@ -198,7 +207,7 @@
 			this.btnConfirm3.Name = "btnConfirm3";
 			this.btnConfirm3.Size = new System.Drawing.Size(75, 23);
 			this.btnConfirm3.TabIndex = 3;
-			this.btnConfirm3.Text = "Confirm";
+			this.btnConfirm3.Text = "确认";
 			this.btnConfirm3.UseVisualStyleBackColor = true;
 			this.btnConfirm3.Click += new System.EventHandler(this.BtnConfirm3_Click);
 			// 
@@ -207,8 +216,8 @@
 			this.chkExtGroups.CheckOnClick = true;
 			this.chkExtGroups.FormattingEnabled = true;
 			this.chkExtGroups.Items.AddRange(new object[] {
-            "minecraft.jar files",
-            "assets files"});
+            "minecraft.jar 文件",
+            "assets 文件"});
 			this.chkExtGroups.Location = new System.Drawing.Point(6, 19);
 			this.chkExtGroups.Name = "chkExtGroups";
 			this.chkExtGroups.Size = new System.Drawing.Size(269, 34);
@@ -223,7 +232,7 @@
 			this.grbHelp.Size = new System.Drawing.Size(246, 358);
 			this.grbHelp.TabIndex = 9;
 			this.grbHelp.TabStop = false;
-			this.grbHelp.Text = "Help";
+			this.grbHelp.Text = "帮助";
 			// 
 			// rtbHelp
 			// 
@@ -244,7 +253,7 @@
 			this.grbStep4.Size = new System.Drawing.Size(362, 151);
 			this.grbStep4.TabIndex = 9;
 			this.grbStep4.TabStop = false;
-			this.grbStep4.Text = "Step 4 : folder(s) from jar to extract";
+			this.grbStep4.Text = "步骤 4：选择要从 jar 提取的文件夹";
 			// 
 			// btnConfirm4
 			// 
@@ -252,7 +261,7 @@
 			this.btnConfirm4.Name = "btnConfirm4";
 			this.btnConfirm4.Size = new System.Drawing.Size(75, 23);
 			this.btnConfirm4.TabIndex = 3;
-			this.btnConfirm4.Text = "Confirm";
+			this.btnConfirm4.Text = "确认";
 			this.btnConfirm4.UseVisualStyleBackColor = true;
 			this.btnConfirm4.Click += new System.EventHandler(this.BtnConfirm4_Click);
 			// 
@@ -283,7 +292,7 @@
 			this.MaximizeBox = false;
 			this.Name = "FrmMre";
 			this.SizeGripStyle = System.Windows.Forms.SizeGripStyle.Hide;
-			this.Text = "Minecraft Resource Extractor";
+			this.Text = "Minecraft 资源提取器";
 			this.FormClosed += new System.Windows.Forms.FormClosedEventHandler(this.FrmMre_FormClosed);
 			this.statusStrip1.ResumeLayout(false);
 			this.statusStrip1.PerformLayout();
@@ -320,6 +329,7 @@
 		public System.Windows.Forms.Button btnConfirm3;
 		public System.Windows.Forms.Button btnConfirm4;
 		public System.Windows.Forms.Button btnLocateJar;
+		public System.Windows.Forms.Button btnBrowse;
 	}
 }
 

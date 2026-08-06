@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(dotnet build *)",
+      "Bash(msbuild mre.sln)",
+      "Bash(dir *.sln *.csproj)"
+    ]
+  }
+}
