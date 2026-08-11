@@ -3,7 +3,18 @@
     "allow": [
       "Bash(dotnet build *)",
       "Bash(msbuild mre.sln)",
-      "Bash(dir *.sln *.csproj)"
+      "Bash(dir *.sln *.csproj)",
+      "Bash(powershell -Command ' *)",
+      "Bash(git checkout *)",
+      "Bash(git add *)",
+      "Bash(git commit -m 'fix: 添加缺失的 Resources 文件 \\(icon.ico, mre.png\\) *)",
+      "Bash(git push *)",
+      "Bash(mkdir -p \"c:\\\\Users\\\\steam\\\\Desktop\\\\123\\\\Minecraft-Resource-Extractor\\\\MinecraftResourceExtractor\\\\Resources\" && mv \"c:\\\\Users\\\\steam\\\\Desktop\\\\123\\\\Minecraft-Resource-Extractor\\\\Resources\" \"c:\\\\Users\\\\steam\\\\Desktop\\\\123\\\\Minecraft-Resource-Extractor\\\\MinecraftResourceExtractor\\\\Resources_temp\" && mv \"c:\\\\Users\\\\steam\\\\Desktop\\\\123\\\\Minecraft-Resource-Extractor\\\\MinecraftResourceExtractor\\\\Resources_temp\"/* \"c:\\\\Users\\\\steam\\\\Desktop\\\\123\\\\Minecraft-Resource-Extractor\\\\MinecraftResourceExtractor\\\\Resources/\" && rmdir \"c:\\\\Users\\\\steam\\\\Desktop\\\\123\\\\Minecraft-Resource-Extractor\\\\MinecraftResourceExtractor\\\\Resources_temp\")",
+      "Bash(git commit -m 'fix: 修复 Resources 路径 *)",
+      "Bash(git commit -m 'fix: 添加缺失的 mre.ico *)"
+    ],
+    "additionalDirectories": [
+      "c:\\Users\\steam\\Desktop\\123\\Minecraft-Resource-Extractor\\MinecraftResourceExtractor\\Resources_temp"
     ]
   }
 }
