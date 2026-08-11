@@ -12,10 +12,11 @@ namespace mre.controller
 			form.txtPath.Text = string.Empty;
 			form.cmbVersions.Items.Clear();
 			form.chkExtFolders.Items.Clear();
+			form.chkResourceTypes.Items.Clear();
 			form.pgbProgress.Value = 0;
 			form.btnLocateJar.Focus();
 			form.SetCheckAll(form.chkExtGroups, true);
-			form.Status("Step 1 > Choose what to extract");
+			form.Status("步骤 1 > 选择提取模式");
 		}
 
 		public static void Step2(FrmMre form)
@@ -25,8 +26,9 @@ namespace mre.controller
 			form.grbStep4.Enabled = false;
 			form.cmbVersions.Focus();
 			form.chkExtFolders.Items.Clear();
+			form.chkResourceTypes.Items.Clear();
 			form.pgbProgress.Value = 0;
-			form.Status("Step 2 > Choose a version to extract");
+			form.Status("步骤 2 > 选择要提取的版本");
 		}
 
 		public static void Step3(FrmMre form)
@@ -34,9 +36,10 @@ namespace mre.controller
 			form.grbStep3.Enabled = true;
 			form.grbStep4.Enabled = false;
 			form.chkExtFolders.Items.Clear();
+			form.chkResourceTypes.Items.Clear();
 			form.btnConfirm3.Focus();
 			form.pgbProgress.Value = 0;
-			form.Status("Step 3 > Choose what to extract");
+			form.Status("步骤 3 > 选择要提取的内容");
 		}
 
 		public static void Step4(FrmMre form)
@@ -44,7 +47,7 @@ namespace mre.controller
 			form.grbStep4.Enabled = true;
 			form.btnConfirm4.Focus();
 			form.pgbProgress.Value = 0;
-			form.Status("Step 4 > Choose folders to extract from jar");
+			form.Status("步骤 4 > 选择要提取的文件夹或资源类型");
 		}
 	}
 }

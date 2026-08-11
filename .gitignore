@@ -6,3 +6,5 @@ Resources
 .vs
 Packages
 mre-for-*.zip
+MRE-v*/
+packages/System.Resources.Extensions*/

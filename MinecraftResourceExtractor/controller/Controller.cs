@@ -28,6 +28,9 @@ namespace mre.controller
 		{
 			target = new Minecraft();
 			((Minecraft)target).McPath = path;
+			settings.LastMcPath = path;
+			settings.SaveConfig();
+			view.txtPath.Text = path;
 			if (((Minecraft)target).FindMcVersions(path))
 			{
 				view.cmbVersions.Items.Clear();
@@ -64,6 +67,26 @@ namespace mre.controller
 		public void LocateMinecraft()
 		{
 			target = new Minecraft();
+
+			// 优先使用记忆的路径
+			if (!string.IsNullOrEmpty(settings.LastMcPath) && Directory.Exists(settings.LastMcPath))
+			{
+				view.txtPath.Text = settings.LastMcPath;
+				if (((Minecraft)target).FindMcVersions(settings.LastMcPath))
+				{
+					((Minecraft)target).McPath = settings.LastMcPath;
+					view.cmbVersions.Items.Clear();
+					foreach (var ver in ((Minecraft)target).Versions)
+					{
+						view.cmbVersions.Items.Add(ver);
+					}
+					view.Log("已找到 .minecraft 文件夹（使用上次路径）。请选择要提取资源的版本。");
+					StepsController.Step2(view);
+					return;
+				}
+			}
+
+			// 尝试默认路径
 			if (((Minecraft)target).McPath != null && ((Minecraft)target).Versions != null)
 			{
 				view.txtPath.Text = ((Minecraft)target).McPath;
@@ -77,7 +100,11 @@ namespace mre.controller
 			}
 			else
 			{
-				view.Log("无法自动定位您的 .minecraft 文件夹。请手动提供路径。", "DarkRed");
+				view.Log("无法自动定位您的 .minecraft 文件夹。请手动提供路径或直接输入路径后点击按钮。", "DarkRed");
+				// 如果有保存的路径但无效，在 txtPath 中显示
+				if (!string.IsNullOrEmpty(settings.LastMcPath))
+					view.txtPath.Text = settings.LastMcPath;
+
 				FolderBrowserDialog browse = new FolderBrowserDialog
 				{
 					Description = "请选择您的 .minecraft 文件夹"
@@ -86,6 +113,8 @@ namespace mre.controller
 				{
 					if (((Minecraft)target).FindMcPath(browse.SelectedPath) && ((Minecraft)target).FindMcVersions(browse.SelectedPath))
 					{
+						settings.LastMcPath = ((Minecraft)target).McPath;
+						settings.SaveConfig();
 						view.txtPath.Text = ((Minecraft)target).McPath;
 						view.cmbVersions.Items.Clear();
 						foreach (var ver in ((Minecraft)target).Versions)
@@ -125,9 +154,40 @@ namespace mre.controller
 				view.txtPath.Text = browse.FileName;
 				view.FillCheckedBox(view.chkExtFolders, target.Jar.ListJarFolders(settings.JavaPath, view));
 				view.SetCheckAll(view.chkExtFolders, true);
-				view.Log("已找到 jar 文件夹，请选择您想要提取的文件夹。");
+				FillResourceTypes();
+				view.Log("已找到 jar 文件夹，请选择您想要提取的文件夹或资源类型。");
 				StepsController.Step4(view);
 			}
+		}
+
+		public void SelectJarFile()
+		{
+			target = new Target();
+			OpenFileDialog browse = new OpenFileDialog
+			{
+				Filter = "Jar 文件 (*.jar)|*.jar",
+				Title = "请选择一个 .jar 文件"
+			};
+			if (browse.ShowDialog() == DialogResult.OK)
+			{
+				LoadJarFile(browse.FileName);
+			}
+		}
+
+		/// <summary>
+		/// 加载指定的 jar 文件（支持手动输入路径）
+		/// </summary>
+		public void LoadJarFile(string filePath)
+		{
+			target = new Target();
+			target.Jar = new JarFile(filePath);
+			view.txtPath.Text = filePath;
+			view.FillCheckedBox(view.chkExtFolders, target.Jar.ListJarFolders(settings.JavaPath, view));
+			view.SetCheckAll(view.chkExtFolders, true);
+			FillResourceTypes();
+			view.Log("已加载 jar 文件，请选择要提取的文件夹或资源类型。");
+			view.Log("找到 " + target.Jar.AllEntries.Count + " 个文件，可用资源类型 " + view.chkResourceTypes.Items.Count + " 种。");
+			StepsController.Step4(view);
 		}
 
 		public void FindVersionJar(string version)
@@ -156,7 +216,8 @@ namespace mre.controller
 			{
 				view.FillCheckedBox(view.chkExtFolders, GetJarFolders());
 				view.SetCheckAll(view.chkExtFolders, true);
-				view.Log("已找到 jar 文件夹，请选择您想要提取的文件夹。");
+				FillResourceTypes();
+				view.Log("已找到 jar 文件夹，请选择您想要提取的文件夹或资源类型。");
 				StepsController.Step4(view);
 			}
 		}
@@ -193,7 +254,8 @@ namespace mre.controller
 				view.Log("Jar 文件下载完成。");
 				view.FillCheckedBox(view.chkExtFolders, GetJarFolders());
 				view.SetCheckAll(view.chkExtFolders, true);
-				view.Log("已找到 jar 文件夹，请选择您想要提取的文件夹。");
+				FillResourceTypes();
+				view.Log("已找到 jar 文件夹，请选择您想要提取的文件夹或资源类型。");
 				StepsController.Step4(view);
 			});
 		}
@@ -216,6 +278,65 @@ namespace mre.controller
 			target.Jar.ExtractJarFolder(folder, settings);
 			view.SwitchUiLock(4);
 			view.Status("Jar 提取完成");
+		}
+
+		public void ExtractResourceType(ResourceType type)
+		{
+			string displayName = ResourceTypes.GetDisplayName(type);
+			view.Status("正在提取 " + displayName + " ...");
+			view.SwitchUiLock(4);
+			target.Jar.ExtractResourceType(type, settings);
+			view.SwitchUiLock(4);
+			view.Status(displayName + " 提取完成");
+		}
+
+		public void FillResourceTypes()
+		{
+			view.chkResourceTypes.Items.Clear();
+
+			// 根据 jar 内容过滤：只显示 jar 中实际存在的资源类型
+			List<ResourceTypeInfo> availableTypes;
+			if (target != null && target.Jar != null)
+				availableTypes = target.Jar.GetAvailableResourceTypes();
+			else
+				availableTypes = new List<ResourceTypeInfo>(ResourceTypes.AllTypes);
+
+			foreach (var info in availableTypes)
+			{
+				view.chkResourceTypes.Items.Add(info.Type);
+			}
+
+			// 根据项目数量自动调整列表高度
+			int itemCount = view.chkResourceTypes.Items.Count;
+			int itemHeight = view.chkResourceTypes.ItemHeight;
+			int desiredHeight = itemCount * itemHeight + 4; // +4 for border
+			int maxHeight = 160; // 最大高度，确保下方控件可见
+			int minHeight = 34;  // 最小高度（约2行）
+
+			if (desiredHeight > maxHeight)
+				desiredHeight = maxHeight;
+			if (desiredHeight < minHeight)
+				desiredHeight = minHeight;
+
+			view.chkResourceTypes.Height = desiredHeight;
+
+			// 动态调整下方控件位置，防止覆盖
+			view.LayoutStep4Controls();
+		}
+
+		public string GetOutputPath()
+		{
+			string outputPath = settings.OutputPath;
+			if (string.IsNullOrEmpty(outputPath))
+				outputPath = Path.Combine(settings.MreDirPath, "mre-output");
+			if (!Directory.Exists(outputPath))
+				Directory.CreateDirectory(outputPath);
+			return outputPath;
+		}
+
+		public void SetOutputPath(string path)
+		{
+			settings.SetOutputPath(path);
 		}
 
 		public void GetAssets()
@@ -260,7 +381,7 @@ namespace mre.controller
 			{
 				string folder = obj.Value.Substring(0, 2);
 				string hashPath = mc.McPath + "\\assets\\objects\\" + folder + "\\" + obj.Value;
-				string objPath = settings.MreDirPath + "\\mre-output\\" + mc.TargetVersion + "-assets\\" + obj.Key;
+				string objPath = settings.GetEffectiveOutputPath() + "\\" + mc.TargetVersion + "-assets\\" + obj.Key;
 				Directory.CreateDirectory(objPath.Substring(0, objPath.LastIndexOf('\\')));
 				try
 				{
@@ -274,10 +395,10 @@ namespace mre.controller
 			if (missingFiles > 0)
 				view.Log("成功复制 " + (mc.AssetsFiles.Hashes.Count - missingFiles) + " 个资源文件，但有 " + missingFiles + " 个文件缺失！", "DarkRed");
 			else
-				view.Log("成功复制 " + (mc.AssetsFiles.Hashes.Count - missingFiles) + " 个资源文件！您的文件位于 \"mre-output\" 文件夹中。", "DarkGreen");
+				view.Log("成功复制 " + (mc.AssetsFiles.Hashes.Count - missingFiles) + " 个资源文件！您的文件位于 " + settings.GetEffectiveOutputPath() + " 文件夹中。", "DarkGreen");
 			view.Status("操作完成！");
 			view.Log("感谢您使用 Minecraft 资源提取器！", "DarkGreen");
-			Process.Start("explorer.exe", settings.MreDirPath + "\\mre-output");
+			Process.Start("explorer.exe", settings.GetEffectiveOutputPath());
 		}
 	}
 }

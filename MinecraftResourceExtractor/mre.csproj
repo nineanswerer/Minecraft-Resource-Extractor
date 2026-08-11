@@ -13,6 +13,7 @@
     <AutoGenerateBindingRedirects>true</AutoGenerateBindingRedirects>
     <Deterministic>true</Deterministic>
     <TargetFrameworkProfile />
+    <GenerateResourceUsePreserializedResources>true</GenerateResourceUsePreserializedResources>
     <IsWebBootstrapper>false</IsWebBootstrapper>
     <PublishUrl>C:\Users\steam\Desktop\123\publish\</PublishUrl>
     <Install>true</Install>
@@ -50,6 +51,7 @@
     <ErrorReport>prompt</ErrorReport>
     <WarningLevel>4</WarningLevel>
     <Prefer32Bit>false</Prefer32Bit>
+    <GenerateManifests>false</GenerateManifests>
   </PropertyGroup>
   <PropertyGroup>
     <ApplicationIcon>Resources\mre.ico</ApplicationIcon>
@@ -82,6 +84,10 @@
     <Reference Include="Newtonsoft.Json, Version=13.0.0.0, Culture=neutral, PublicKeyToken=30ad4fe6b2a6aeed, processorArchitecture=MSIL">
       <HintPath>..\packages\Newtonsoft.Json.13.0.2\lib\net45\Newtonsoft.Json.dll</HintPath>
     </Reference>
+    <Reference Include="System.Resources.Extensions, Version=8.0.0.0, Culture=neutral, PublicKeyToken=cc7b13ffcd2ddd51">
+      <HintPath>..\packages\System.Resources.Extensions.8.0.0\lib\net462\System.Resources.Extensions.dll</HintPath>
+      <Private>True</Private>
+    </Reference>
     <Reference Include="System" />
     <Reference Include="Microsoft.CSharp" />
     <Reference Include="System.Data" />
@@ -96,6 +102,7 @@
     <Compile Include="model\Assets.cs" />
     <Compile Include="model\JarFile.cs" />
     <Compile Include="model\Minecraft.cs" />
+    <Compile Include="model\ResourceType.cs" />
     <Compile Include="model\Settings.cs" />
     <Compile Include="model\Target.cs" />
     <Compile Include="view\FrmAbout.cs">
