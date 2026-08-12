@@ -15,6 +15,8 @@ namespace mre.view
 	{
 		public Controller controller { get; }
 		public CheckBox chkGroupByType;  // 按资源类型分类输出
+		private SplitContainer splitHelp;
+		private TreeView treeDirectory;
 
 		// 现代配色方案
 		private static readonly Color C_PRIMARY = Color.FromArgb(74, 144, 217);
@@ -33,6 +35,8 @@ namespace mre.view
 			InitializeComponent();
 			InitializeModsPanel();
 			InitializeOutputOptions();
+			InitializeSelectAllLinks();
+			InitializeDirectoryTree();
 			ApplyModernStyle();
 			controller = new Controller(this);
 			if (controller.GetJavaPath() == null)
@@ -204,6 +208,144 @@ namespace mre.view
 		}
 
 		/// <summary>
+		/// 初始化目录树预览：在右侧帮助面板中创建垂直分割容器
+		/// 上方为目录树，下方为日志输出
+		/// </summary>
+		private void InitializeDirectoryTree()
+		{
+			// 创建垂直分割容器（上方目录树，下方日志）
+			splitHelp = new SplitContainer
+			{
+				Dock = DockStyle.Fill,
+				Orientation = Orientation.Horizontal,
+				SplitterDistance = 210,
+				Panel1MinSize = 60,
+				Panel2MinSize = 60,
+				BackColor = C_BORDER
+			};
+
+			// Panel1 标题标签
+			var lblTreeTitle = new Label
+			{
+				Text = "  目录结构预览",
+				Dock = DockStyle.Top,
+				Font = new Font("Microsoft YaHei", 9F, FontStyle.Bold),
+				ForeColor = C_GB_HEADER,
+				BackColor = C_SURFACE,
+				Height = 22,
+				TextAlign = ContentAlignment.MiddleLeft
+			};
+
+			// Panel1 目录树
+			treeDirectory = new TreeView
+			{
+				Dock = DockStyle.Fill,
+				BorderStyle = BorderStyle.None,
+				BackColor = Color.FromArgb(248, 250, 252),
+				Font = new Font("Microsoft YaHei", 8.5F),
+				ShowLines = true,
+				ShowPlusMinus = true,
+				HideSelection = false
+			};
+			treeDirectory.AfterSelect += (s, e) =>
+			{
+				if (e.Node?.Tag is string path && !string.IsNullOrEmpty(path))
+					Status("目录: " + path);
+			};
+
+			// 重新组织 grbHelp 控件
+			grbHelp.Controls.Remove(rtbHelp);
+
+			splitHelp.Panel1.Controls.Add(treeDirectory);
+			splitHelp.Panel1.Controls.Add(lblTreeTitle);
+
+			splitHelp.Panel2.Controls.Add(rtbHelp);
+			rtbHelp.Dock = DockStyle.Fill;
+
+			grbHelp.Controls.Add(splitHelp);
+
+			// 更新帮助面板样式
+			grbHelp.BackColor = C_SURFACE;
+		}
+
+		/// <summary>
+		/// 根据 jar 文件内容填充目录树
+		/// </summary>
+		public void PopulateDirectoryTree(JarFile jar)
+		{
+			if (treeDirectory == null) return;
+
+			treeDirectory.Nodes.Clear();
+
+			if (jar == null || jar.AllEntries == null || jar.AllEntries.Count == 0)
+			{
+				treeDirectory.Nodes.Add(new TreeNode("（加载 jar 后显示目录结构）"));
+				return;
+			}
+
+			var dirs = jar.GetDirectoryTree(maxDepth: 4);
+			if (dirs.Count == 0)
+			{
+				treeDirectory.Nodes.Add(new TreeNode("（无可用目录结构）"));
+				return;
+			}
+
+			// 单次遍历预计算每个目录的文件数（避免 O(N×M) 复杂度）
+			var dirFileCounts = new Dictionary<string, int>();
+			foreach (string entry in jar.AllEntries)
+			{
+				string normalized = entry.Replace('\\', '/');
+				if (normalized.EndsWith("/")) continue;
+				int lastSlash = normalized.LastIndexOf('/');
+				if (lastSlash > 0)
+				{
+					string dir = normalized.Substring(0, lastSlash + 1);
+					dirFileCounts.TryGetValue(dir, out int c);
+					dirFileCounts[dir] = c + 1;
+				}
+			}
+
+			// 使用 jar 文件名作为根节点
+			string rootLabel = jar.FullName ?? "jar 内容";
+			var root = new TreeNode(rootLabel) { ImageIndex = -1, SelectedImageIndex = -1 };
+			treeDirectory.Nodes.Add(root);
+
+			// 从扁平的目录列表构建树形层级
+			var nodeMap = new Dictionary<string, TreeNode>();
+
+			foreach (string dirPath in dirs)
+			{
+				string trimmed = dirPath.TrimEnd('/');
+				string[] parts = trimmed.Split('/');
+
+				TreeNode parent = root;
+				string accumulated = "";
+
+				foreach (string part in parts)
+				{
+					if (string.IsNullOrEmpty(part)) continue;
+					accumulated += (accumulated == "" ? "" : "/") + part + "/";
+
+					if (!nodeMap.TryGetValue(accumulated, out TreeNode existing))
+					{
+						dirFileCounts.TryGetValue(accumulated, out int fileCount);
+						string displayText = part + "/";
+						if (fileCount > 0)
+							displayText += "  (" + fileCount + " 个文件)";
+
+						existing = new TreeNode(displayText) { Tag = accumulated };
+						parent.Nodes.Add(existing);
+						nodeMap[accumulated] = existing;
+					}
+
+					parent = existing;
+				}
+			}
+
+			root.Expand();
+		}
+
+		/// <summary>
 		/// 初始化输出结构选项复选框（添加到 grbStep4）
 		/// </summary>
 		private void InitializeOutputOptions()
@@ -224,6 +366,47 @@ namespace mre.view
 					Log("输出结构：按模组名 → 资源内容");
 			};
 			grbStep4.Controls.Add(chkGroupByType);
+		}
+
+		/// <summary>
+		/// 初始化全选/取消全选链接（添加到 grbStep4，位于资源类型标签右侧）
+		/// </summary>
+		private void InitializeSelectAllLinks()
+		{
+			var lnkSelectAll = new LinkLabel
+			{
+				Text = "全选",
+				Location = new System.Drawing.Point(115, 57),
+				AutoSize = true,
+				LinkColor = C_PRIMARY,
+				ActiveLinkColor = C_PRIMARY_HOVER,
+				VisitedLinkColor = C_PRIMARY,
+				TabStop = false
+			};
+			lnkSelectAll.LinkClicked += (s, e) =>
+			{
+				SetCheckAll(chkResourceTypes, true);
+				Log("已全选所有资源类型");
+			};
+
+			var lnkDeselectAll = new LinkLabel
+			{
+				Text = "取消全选",
+				Location = new System.Drawing.Point(155, 57),
+				AutoSize = true,
+				LinkColor = C_PRIMARY,
+				ActiveLinkColor = C_PRIMARY_HOVER,
+				VisitedLinkColor = C_PRIMARY,
+				TabStop = false
+			};
+			lnkDeselectAll.LinkClicked += (s, e) =>
+			{
+				SetCheckAll(chkResourceTypes, false);
+				Log("已取消全选");
+			};
+
+			grbStep4.Controls.Add(lnkSelectAll);
+			grbStep4.Controls.Add(lnkDeselectAll);
 		}
 
 		/// <summary>
