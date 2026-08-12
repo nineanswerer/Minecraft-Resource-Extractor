@@ -1,4 +1,4 @@
-﻿using mre.view;
+using mre.view;
 using System;
 using System.Windows.Forms;
 

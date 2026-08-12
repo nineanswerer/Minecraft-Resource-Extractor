@@ -21,6 +21,15 @@ namespace mre.model
 			Name = FullName.Substring(0, FullName.LastIndexOf("."));
 		}
 
+		/// <summary>
+		/// 外部设置 AllEntries（用于聚合多个 jar 的条目）
+		/// </summary>
+		public void SetAllEntries(List<string> entries)
+		{
+			AllEntries = entries;
+			ResourceTypes.UpdateJarPaths(AllEntries);
+		}
+
 		public List<string> ListJarFolders(string javaPath, FrmMre view)
 		{
 			Folders = new List<string>();
@@ -129,30 +138,62 @@ namespace mre.model
 
 		public void ExtractResourceType(ResourceType type, Settings settings)
 		{
+			ExtractResourceType(type, settings, null);
+		}
+
+		/// <summary>
+		/// 按资源类型提取，支持自定义子目录前缀（用于按类型分类输出）
+		/// </summary>
+		public void ExtractResourceType(ResourceType type, Settings settings, string subDirPrefix)
+		{
 			List<string> jarPaths = ResourceTypes.GetJarPathsForType(type);
 			foreach (string jarPath in jarPaths)
 			{
-				ExtractPath(jarPath, settings);
+				ExtractPath(jarPath, settings, subDirPrefix);
 			}
+		}
+
+		/// <summary>
+		/// 获取提取的资源文件数量（估算）
+		/// </summary>
+		public int CountResourceTypeFiles(ResourceType type)
+		{
+			if (AllEntries == null) return 0;
+			List<string> jarPaths = ResourceTypes.GetJarPathsForType(type);
+			int count = 0;
+			foreach (string jarPath in jarPaths)
+			{
+				string prefix = jarPath.TrimEnd('/');
+				foreach (string entry in AllEntries)
+				{
+					string normalized = entry.Replace('\\', '/');
+					if (normalized.StartsWith(prefix + "/") || normalized.StartsWith(prefix))
+						count++;
+				}
+			}
+			return count;
 		}
 
 		public void ExtractPaths(List<string> paths, Settings settings)
 		{
 			foreach (string path in paths)
 			{
-				ExtractPath(path, settings);
+				ExtractPath(path, settings, null);
 			}
 		}
 
-		private void ExtractPath(string jarPath, Settings settings)
+		private void ExtractPath(string jarPath, Settings settings, string subDirPrefix = null)
 		{
-			Directory.CreateDirectory(settings.GetEffectiveOutputPath() + "\\" + Name);
+			string outputDir = settings.GetEffectiveOutputPath() + "\\" + Name;
+			if (!string.IsNullOrEmpty(subDirPrefix))
+				outputDir = settings.GetEffectiveOutputPath() + "\\" + subDirPrefix + "\\" + Name;
+			Directory.CreateDirectory(outputDir);
 			Process javaProcess = new Process();
 			javaProcess.StartInfo.FileName = settings.JavaPath;
 			javaProcess.StartInfo.Arguments = "-xvf \"" + Path + "\" \"" + jarPath + "\"";
 			javaProcess.StartInfo.UseShellExecute = false;
 			javaProcess.StartInfo.CreateNoWindow = true;
-			javaProcess.StartInfo.WorkingDirectory = settings.GetEffectiveOutputPath() + "\\" + Name;
+			javaProcess.StartInfo.WorkingDirectory = outputDir;
 			javaProcess.Start();
 			javaProcess.WaitForExit();
 			javaProcess.Close();

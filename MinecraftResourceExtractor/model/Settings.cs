@@ -14,6 +14,7 @@ namespace mre.model
 		public string JavaPath { get; set; } = null;
 		public string OutputPath { get; set; } = null;
 		public string LastMcPath { get; set; } = null;
+		public string LastBatchInputPath { get; set; } = null;
 
 		private static string ConfigDir
 		{
@@ -56,7 +57,8 @@ namespace mre.model
 				{
 					javaPath = JavaPath,
 					outputPath = OutputPath,
-					lastMcPath = LastMcPath
+					lastMcPath = LastMcPath,
+					lastBatchInputPath = LastBatchInputPath
 				};
 				File.WriteAllText(ConfigFile, JsonConvert.SerializeObject(config, Formatting.Indented));
 			}
@@ -77,7 +79,8 @@ namespace mre.model
 					{
 						javaPath = "",
 						outputPath = "",
-						lastMcPath = ""
+						lastMcPath = "",
+						lastBatchInputPath = ""
 					});
 					if (config != null)
 					{
@@ -87,6 +90,8 @@ namespace mre.model
 							OutputPath = config.outputPath;
 						if (!string.IsNullOrEmpty(config.lastMcPath))
 							LastMcPath = config.lastMcPath;
+						if (!string.IsNullOrEmpty(config.lastBatchInputPath))
+							LastBatchInputPath = config.lastBatchInputPath;
 					}
 				}
 			}

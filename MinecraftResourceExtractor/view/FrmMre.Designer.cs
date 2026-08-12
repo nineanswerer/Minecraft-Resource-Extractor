@@ -25,6 +25,7 @@ namespace mre.view
 			this.grbStep1 = new System.Windows.Forms.GroupBox();
 			this.rdbExMinecraft = new System.Windows.Forms.RadioButton();
 			this.rdbExJar = new System.Windows.Forms.RadioButton();
+			this.rdbExMods = new System.Windows.Forms.RadioButton();
 			this.txtPath = new System.Windows.Forms.TextBox();
 			this.btnLocateJar = new System.Windows.Forms.Button();
 			this.grbStep2 = new System.Windows.Forms.GroupBox();
@@ -95,7 +96,7 @@ namespace mre.view
 			this.tlpMain.Name = "tlpMain";
 			this.tlpMain.Padding = new System.Windows.Forms.Padding(8, 8, 8, 4);
 			this.tlpMain.RowCount = 5;
-			this.tlpMain.RowStyles.Add(new System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.Absolute, 130F));
+			this.tlpMain.RowStyles.Add(new System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.Absolute, 150F));
 			this.tlpMain.RowStyles.Add(new System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.Absolute, 58F));
 			this.tlpMain.RowStyles.Add(new System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.Absolute, 70F));
 			this.tlpMain.RowStyles.Add(new System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.Percent, 100F));
@@ -107,11 +108,12 @@ namespace mre.view
 			//
 			this.grbStep1.Controls.Add(this.rdbExMinecraft);
 			this.grbStep1.Controls.Add(this.rdbExJar);
+			this.grbStep1.Controls.Add(this.rdbExMods);
 			this.grbStep1.Controls.Add(this.txtPath);
 			this.grbStep1.Controls.Add(this.btnLocateJar);
 			this.grbStep1.Dock = System.Windows.Forms.DockStyle.Fill;
 			this.grbStep1.Location = new System.Drawing.Point(11, 11);
-			this.grbStep1.MinimumSize = new System.Drawing.Size(280, 120);
+			this.grbStep1.MinimumSize = new System.Drawing.Size(280, 145);
 			this.grbStep1.Name = "grbStep1";
 			this.grbStep1.Size = new System.Drawing.Size(466, 124);
 			this.grbStep1.TabIndex = 3;
@@ -142,11 +144,22 @@ namespace mre.view
 			this.rdbExJar.UseVisualStyleBackColor = true;
 			this.rdbExJar.CheckedChanged += new System.EventHandler(this.RdbExMinecraft_CheckedChanged);
 			//
+			// rdbExMods
+			//
+			this.rdbExMods.AutoSize = true;
+			this.rdbExMods.Location = new System.Drawing.Point(6, 65);
+			this.rdbExMods.Name = "rdbExMods";
+			this.rdbExMods.Size = new System.Drawing.Size(130, 17);
+			this.rdbExMods.TabIndex = 6;
+			this.rdbExMods.Text = "批量提取 Mod 资源";
+			this.rdbExMods.UseVisualStyleBackColor = true;
+			this.rdbExMods.CheckedChanged += new System.EventHandler(this.RdbExMinecraft_CheckedChanged);
+			//
 			// txtPath
 			//
 			this.txtPath.Anchor = ((System.Windows.Forms.AnchorStyles)(((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Left)
 			| System.Windows.Forms.AnchorStyles.Right)));
-			this.txtPath.Location = new System.Drawing.Point(6, 70);
+			this.txtPath.Location = new System.Drawing.Point(6, 90);
 			this.txtPath.Name = "txtPath";
 			this.txtPath.Size = new System.Drawing.Size(374, 20);
 			this.txtPath.TabIndex = 2;
@@ -156,7 +169,7 @@ namespace mre.view
 			this.btnLocateJar.Anchor = ((System.Windows.Forms.AnchorStyles)(((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Left)
 			| System.Windows.Forms.AnchorStyles.Right)));
 			this.btnLocateJar.FlatStyle = System.Windows.Forms.FlatStyle.Flat;
-			this.btnLocateJar.Location = new System.Drawing.Point(6, 96);
+			this.btnLocateJar.Location = new System.Drawing.Point(6, 116);
 			this.btnLocateJar.Name = "btnLocateJar";
 			this.btnLocateJar.Size = new System.Drawing.Size(454, 23);
 			this.btnLocateJar.TabIndex = 1;
@@ -378,11 +391,11 @@ namespace mre.view
 			//
 			this.AutoScaleDimensions = new System.Drawing.SizeF(6F, 13F);
 			this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font;
-			this.ClientSize = new System.Drawing.Size(734, 500);
+			this.ClientSize = new System.Drawing.Size(734, 620);
 			this.Controls.Add(this.tlpMain);
 			this.Controls.Add(this.statusStrip1);
-			this.Icon = ((System.Drawing.Icon)(resources.GetObject("$this.Icon")));
-			this.MinimumSize = new System.Drawing.Size(700, 450);
+			this.Icon = new System.Drawing.Icon(System.IO.Path.Combine(System.Windows.Forms.Application.StartupPath, "Resources\\mre.ico"));
+			this.MinimumSize = new System.Drawing.Size(700, 600);
 			this.Name = "FrmMre";
 			this.StartPosition = System.Windows.Forms.FormStartPosition.CenterScreen;
 			this.Text = "Minecraft 资源提取器";
@@ -413,6 +426,11 @@ namespace mre.view
 		public System.Windows.Forms.RadioButton rdbExMinecraft;
 		public System.Windows.Forms.TextBox txtPath;
 		public System.Windows.Forms.RadioButton rdbExJar;
+		public System.Windows.Forms.RadioButton rdbExMods;
+		public System.Windows.Forms.Panel pnlModsDir;
+		public System.Windows.Forms.TextBox txtModsDir;
+		public System.Windows.Forms.Button btnBrowseModsDir;
+		public System.Windows.Forms.Button btnConfirm2Mods;
 		public System.Windows.Forms.GroupBox grbStep2;
 		public System.Windows.Forms.ComboBox cmbVersions;
 		public System.Windows.Forms.GroupBox grbStep3;

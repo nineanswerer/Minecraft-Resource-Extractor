@@ -13,7 +13,8 @@ namespace mre.view
 {
 	public partial class FrmMre : Form
 	{
-		private Controller controller { get; }
+		public Controller controller { get; }
+		public CheckBox chkGroupByType;  // 按资源类型分类输出
 
 		// 现代配色方案
 		private static readonly Color C_PRIMARY = Color.FromArgb(74, 144, 217);
@@ -30,6 +31,8 @@ namespace mre.view
 		public FrmMre()
 		{
 			InitializeComponent();
+			InitializeModsPanel();
+			InitializeOutputOptions();
 			ApplyModernStyle();
 			controller = new Controller(this);
 			if (controller.GetJavaPath() == null)
@@ -72,11 +75,13 @@ namespace mre.view
 			StyleGroupBox(grbHelp);
 
 			// --- 按钮样式 ---
-			StyleButton(btnLocateJar, C_PRIMARY);
-			StyleButton(btnConfirm2, C_PRIMARY);
-			StyleButton(btnConfirm3, C_PRIMARY);
-			StyleButton(btnConfirm4, C_SUCCESS);
-			StyleButton(btnBrowseOutput, Color.FromArgb(108, 117, 125));
+			StyleButton(btnLocateJar, C_PRIMARY);        // 浏览 - 蓝色
+		StyleButton(btnConfirm2, C_SUCCESS);        // 确认 - 绿色
+		StyleButton(btnConfirm3, C_SUCCESS);        // 确认 - 绿色
+		StyleButton(btnConfirm4, C_SUCCESS);        // 确认 - 绿色
+		StyleButton(btnBrowseOutput, Color.FromArgb(108, 117, 125));  // 辅助 - 灰色
+		StyleButton(btnBrowseModsDir, C_PRIMARY);   // 浏览 - 蓝色
+		StyleButton(btnConfirm2Mods, C_SUCCESS);    // 扫描 - 绿色
 
 			// --- 帮助面板 ---
 			grbHelp.BackColor = C_SURFACE;
@@ -176,17 +181,174 @@ namespace mre.view
 
 		private void SwitchExtractionType()
 		{
-			if (rdbExMinecraft.Checked)
+			if (rdbExMods.Checked)
+			{
+				rdbExMinecraft.Checked = false;
+				rdbExJar.Checked = false;
+				btnLocateJar.Text = "浏览...";
+				SetBatchModeUI(true);
+			}
+			else if (rdbExMinecraft.Checked)
 			{
 				rdbExJar.Checked = false;
 				btnLocateJar.Text = "定位...";
+				SetBatchModeUI(false);
 			}
 			else
 			{
 				rdbExMinecraft.Checked = false;
 				btnLocateJar.Text = "浏览...";
+				SetBatchModeUI(false);
 			}
 			StepsController.Step1(this);
+		}
+
+		/// <summary>
+		/// 初始化输出结构选项复选框（添加到 grbStep4）
+		/// </summary>
+		private void InitializeOutputOptions()
+		{
+			chkGroupByType = new CheckBox
+			{
+				Text = "按资源类型分类（输出/类型/模组名/资源...）",
+				Location = new System.Drawing.Point(6, 186),
+				Size = new System.Drawing.Size(350, 17),
+				Visible = false,
+				Checked = false
+			};
+			chkGroupByType.CheckedChanged += (s, e) =>
+			{
+				if (chkGroupByType.Checked)
+					Log("输出结构：按资源类型 → 模组名 → 资源内容");
+				else
+					Log("输出结构：按模组名 → 资源内容");
+			};
+			grbStep4.Controls.Add(chkGroupByType);
+		}
+
+		/// <summary>
+		/// 初始化 Mod 批量模式的动态面板控件（添加到 grbStep2）
+		/// </summary>
+		private void InitializeModsPanel()
+		{
+			// 创建面板
+			pnlModsDir = new Panel
+			{
+				Location = new System.Drawing.Point(6, 19),
+				Size = new System.Drawing.Size(454, 52),
+				Visible = false
+			};
+
+			// Mods 目录文本框
+			txtModsDir = new TextBox
+			{
+				Location = new System.Drawing.Point(0, 0),
+				Size = new System.Drawing.Size(300, 20),
+				Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right,
+				Text = ""
+			};
+
+			// 浏览按钮
+			btnBrowseModsDir = new Button
+			{
+				Location = new System.Drawing.Point(306, -1),
+				Size = new System.Drawing.Size(68, 23),
+				Anchor = AnchorStyles.Top | AnchorStyles.Right,
+				Text = "浏览...",
+				FlatStyle = FlatStyle.Flat,
+				UseVisualStyleBackColor = false
+			};
+			btnBrowseModsDir.Click += BtnBrowseModsDir_Click;
+
+			// 确认扫描按钮
+			btnConfirm2Mods = new Button
+			{
+				Location = new System.Drawing.Point(379, -1),
+				Size = new System.Drawing.Size(75, 23),
+				Anchor = AnchorStyles.Top | AnchorStyles.Right,
+				Text = "扫描",
+				FlatStyle = FlatStyle.Flat,
+				UseVisualStyleBackColor = false
+			};
+			btnConfirm2Mods.Click += BtnConfirm2Mods_Click;
+
+			pnlModsDir.Controls.Add(txtModsDir);
+			pnlModsDir.Controls.Add(btnBrowseModsDir);
+			pnlModsDir.Controls.Add(btnConfirm2Mods);
+
+			grbStep2.Controls.Add(pnlModsDir);
+		}
+
+		/// <summary>
+		/// 切换批量模式 UI 显示/隐藏
+		/// </summary>
+		private void SetBatchModeUI(bool isBatch)
+		{
+			// grbStep2 控件切换
+			cmbVersions.Visible = !isBatch;
+			btnConfirm2.Visible = !isBatch;
+			pnlModsDir.Visible = isBatch;
+
+			if (isBatch)
+			{
+				grbStep2.Text = "步骤 2：选择 Mods 目录";
+				// 加载上次使用的 Mods 目录
+				if (!string.IsNullOrEmpty(controller.settings.LastBatchInputPath))
+					txtModsDir.Text = controller.settings.LastBatchInputPath;
+			}
+			else
+			{
+				grbStep2.Text = "步骤 2：选择要提取的版本";
+			}
+
+			// grbStep3：批量模式下禁用并更改标题
+			if (isBatch)
+			{
+				grbStep3.Text = "步骤 3：（批量模式已跳过）";
+				grbStep3.Enabled = false;
+			}
+			else
+			{
+				grbStep3.Text = "步骤 3：选择要提取的分组";
+			}
+
+			// 输出结构选项仅在批量模式下显示
+			if (chkGroupByType != null)
+				chkGroupByType.Visible = isBatch;
+		}
+
+		/// <summary>
+		/// 浏览 Mods 目录
+		/// </summary>
+		private void BtnBrowseModsDir_Click(object sender, EventArgs e)
+		{
+			using (var dialog = new FolderBrowserDialog())
+			{
+				dialog.Description = "选择包含 Mod .jar 文件的目录（如 .minecraft/mods）";
+				if (!string.IsNullOrEmpty(txtModsDir.Text) && Directory.Exists(txtModsDir.Text))
+					dialog.SelectedPath = txtModsDir.Text;
+				if (dialog.ShowDialog(this) == DialogResult.OK)
+				{
+					txtModsDir.Text = dialog.SelectedPath;
+				}
+			}
+		}
+
+		/// <summary>
+		/// 确认 Mods 目录并扫描 jar 文件
+		/// </summary>
+		private void BtnConfirm2Mods_Click(object sender, EventArgs e)
+		{
+			string modsDir = txtModsDir.Text.Trim();
+			if (string.IsNullOrEmpty(modsDir) || !Directory.Exists(modsDir))
+			{
+				MessageBox.Show("请先选择一个有效的 Mods 目录！", "提示", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+				return;
+			}
+
+			controller.settings.LastBatchInputPath = modsDir;
+			controller.settings.SaveConfig();
+			controller.LoadModsDirectory(modsDir);
 		}
 
 		private void RdbExMinecraft_CheckedChanged(object sender, EventArgs e)
@@ -196,7 +358,26 @@ namespace mre.view
 
 		private void BtnLocateJar_Click(object sender, EventArgs e)
 		{
-			if (rdbExMinecraft.Checked)
+			if (rdbExMods.Checked)
+			{
+				// 批量 Mod 模式：打开文件夹选择框
+				using (var dialog = new FolderBrowserDialog())
+				{
+					dialog.Description = "选择包含 Mod .jar 文件的目录（如 .minecraft/mods）";
+					if (!string.IsNullOrEmpty(txtPath.Text) && Directory.Exists(txtPath.Text))
+						dialog.SelectedPath = txtPath.Text;
+					if (dialog.ShowDialog(this) == DialogResult.OK)
+					{
+						txtPath.Text = dialog.SelectedPath;
+						controller.settings.LastBatchInputPath = dialog.SelectedPath;
+						controller.settings.SaveConfig();
+						StepsController.Step2(this);
+						Log("已选择 Mods 目录：" + dialog.SelectedPath);
+						Log("请点击[扫描]按钮检测目录中的 Mod 文件。");
+					}
+				}
+			}
+			else if (rdbExMinecraft.Checked)
 			{
 				string manualPath = txtPath.Text.Trim();
 				if (!string.IsNullOrEmpty(manualPath) && Directory.Exists(manualPath))
@@ -240,6 +421,37 @@ namespace mre.view
 
 		private void BtnConfirm4_Click(object sender, EventArgs e)
 		{
+			// 批量 Mod 模式：按选中的资源类型执行批量提取
+			if (rdbExMods.Checked)
+			{
+				string modsDir = txtModsDir.Text.Trim();
+				string outputDir = txtOutputPath.Text.Trim();
+				if (string.IsNullOrEmpty(outputDir))
+					outputDir = controller.GetOutputPath();
+
+				// 收集用户选中的资源类型
+				var selectedTypes = new List<ResourceType>();
+				for (int i = 0; i < chkResourceTypes.Items.Count; i++)
+				{
+					if (chkResourceTypes.GetItemChecked(i))
+						selectedTypes.Add((ResourceType)chkResourceTypes.Items[i]);
+				}
+
+				if (selectedTypes.Count == 0)
+				{
+					MessageBox.Show("请至少选择一种要提取的资源类型！", "提示", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+					return;
+				}
+
+				Log("正在开始批量提取 Mod 资源，这可能需要一些时间，请耐心等待...");
+				Log("选中的资源类型: " + string.Join("、", selectedTypes.Select(t => ResourceTypes.GetDisplayName(t))));
+				Log("Mods 目录: " + modsDir);
+				Log("输出目录: " + outputDir);
+
+				controller.RunBatchExtractionFiltered(modsDir, outputDir, selectedTypes);
+				return;
+			}
+
 			if (rdbExJar.Checked || chkExtGroups.GetItemChecked(0))
 			{
 				Log("正在开始 jar 提取，这可能需要一些时间，请耐心等待...");
@@ -346,7 +558,29 @@ namespace mre.view
 			txtOutputPath.Top = y;
 			btnBrowseOutput.Top = y - 1;
 
-			btnConfirm4.Top = txtOutputPath.Bottom + 8;
+			y = txtOutputPath.Bottom + 8;
+
+			// 输出结构选项（如果有的话）
+			if (chkGroupByType != null && chkGroupByType.Visible)
+			{
+				chkGroupByType.Top = y;
+				y = chkGroupByType.Bottom + 8;
+			}
+
+			btnConfirm4.Top = y;
+
+			// 动态调整 grbStep4 的最小高度以适应内容
+			int neededGrb4Height = btnConfirm4.Bottom + 10;
+			grbStep4.MinimumSize = new System.Drawing.Size(280, neededGrb4Height);
+
+			// 动态调整窗体的最小高度，确保确认按钮不被遮挡
+			// tlpMain 各行的总高度: row0(150) + row1(58) + row2(70) + row4(24) + padding(12) + statusStrip(22) ≈ 336
+			int neededClientHeight = 336 + neededGrb4Height;
+			int neededFormHeight = neededClientHeight + 32; // title bar 补偿
+			if (neededFormHeight < 580) neededFormHeight = 580;
+			MinimumSize = new System.Drawing.Size(700, neededFormHeight);
+			if (Height < neededFormHeight)
+				Height = neededFormHeight;
 		}
 
 		private void FrmMre_FormClosed(object sender, FormClosedEventArgs e)
