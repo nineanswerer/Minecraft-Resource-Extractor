@@ -17,6 +17,9 @@ namespace mre.view
 		public CheckBox chkGroupByType;  // 按资源类型分类输出
 		private SplitContainer splitHelp;
 		private TreeView treeDirectory;
+		private Label lblFileCountPreview;
+		private Dictionary<string, SortedSet<string>> _treeSubdirs;
+		private Dictionary<string, SortedSet<string>> _treeFiles;
 
 		// 现代配色方案
 		private static readonly Color C_PRIMARY = Color.FromArgb(74, 144, 217);
@@ -37,6 +40,8 @@ namespace mre.view
 			InitializeOutputOptions();
 			InitializeSelectAllLinks();
 			InitializeDirectoryTree();
+			InitializeFileCountPreview();
+			InitializeDragDrop();
 			ApplyModernStyle();
 			controller = new Controller(this);
 			if (controller.GetJavaPath() == null)
@@ -147,13 +152,52 @@ namespace mre.view
 
 		public void Log(string msg, string color = "Black")
 		{
+			if (rtbHelp.InvokeRequired)
+			{
+				rtbHelp.BeginInvoke((MethodInvoker)(() => Log(msg, color)));
+				return;
+			}
 			rtbHelp.SelectionColor = Color.FromName(color);
 			rtbHelp.AppendText("- " + msg + '\n');
 		}
 
 		public void Status(string msg)
 		{
+			if (InvokeRequired)
+			{
+				BeginInvoke((MethodInvoker)(() => Status(msg)));
+				return;
+			}
 			slbStatusLabel.Text = msg;
+		}
+
+		/// <summary>
+		/// 设置进度条值（可跨线程调用）
+		/// </summary>
+		public void SetProgress(int value)
+		{
+			if (InvokeRequired)
+			{
+				BeginInvoke((MethodInvoker)(() => SetProgress(value)));
+				return;
+			}
+			if (value >= pgbProgress.Minimum && value <= pgbProgress.Maximum)
+				pgbProgress.Value = value;
+		}
+
+		/// <summary>
+		/// 设置进度条范围（可跨线程调用）
+		/// </summary>
+		public void SetProgressRange(int min, int max)
+		{
+			if (InvokeRequired)
+			{
+				BeginInvoke((MethodInvoker)(() => SetProgressRange(min, max)));
+				return;
+			}
+			pgbProgress.Minimum = min;
+			pgbProgress.Maximum = max;
+			pgbProgress.Value = min;
 		}
 
 		public void SetCheckAll(CheckedListBox elem, bool value)
@@ -250,7 +294,18 @@ namespace mre.view
 			treeDirectory.AfterSelect += (s, e) =>
 			{
 				if (e.Node?.Tag is string path && !string.IsNullOrEmpty(path))
-					Status("目录: " + path);
+					Status(path.EndsWith("/") ? "目录: " + path : "文件: " + path);
+			};
+
+			// 懒加载：展开目录时才加载其子项（避免一次加载几十万节点）
+			treeDirectory.BeforeExpand += (s, e) =>
+			{
+				if (e.Node?.Tag is string dirPath
+					&& e.Node.Nodes.Count == 1
+					&& e.Node.Nodes[0].Text == "...")
+				{
+					AddChildrenToNode(e.Node, dirPath);
+				}
 			};
 
 			// 重新组织 grbHelp 控件
@@ -269,7 +324,61 @@ namespace mre.view
 		}
 
 		/// <summary>
-		/// 根据 jar 文件内容填充目录树
+		/// 从 jar 条目构建「目录 → 直接子目录/直接文件」索引。
+		/// 不涉及 UI，可放在后台线程执行，避免海量条目时卡住界面。
+		/// </summary>
+		public void BuildDirectoryTreeIndex(JarFile jar)
+		{
+			var subdirs = new Dictionary<string, SortedSet<string>>();
+			var files = new Dictionary<string, SortedSet<string>>();
+
+			if (jar?.AllEntries != null)
+			{
+				foreach (string rawEntry in jar.AllEntries)
+				{
+					string entry = rawEntry.Replace('\\', '/');
+					bool isDir = entry.EndsWith("/");
+					string[] parts = entry.Split('/');
+
+					string accumulated = "";
+					for (int i = 0; i < parts.Length; i++)
+					{
+						string part = parts[i];
+						if (string.IsNullOrEmpty(part)) continue;
+
+						if (i == parts.Length - 1 && !isDir)
+						{
+							// 文件
+							if (!files.TryGetValue(accumulated, out var fileSet))
+							{
+								fileSet = new SortedSet<string>();
+								files[accumulated] = fileSet;
+							}
+							fileSet.Add(part);
+						}
+						else
+						{
+							// 目录
+							string childDir = accumulated + part + "/";
+							if (!subdirs.TryGetValue(accumulated, out var dirSet))
+							{
+								dirSet = new SortedSet<string>();
+								subdirs[accumulated] = dirSet;
+							}
+							dirSet.Add(childDir);
+							accumulated = childDir;
+						}
+					}
+				}
+			}
+
+			_treeSubdirs = subdirs;
+			_treeFiles = files;
+		}
+
+		/// <summary>
+		/// 根据 jar 文件内容填充目录树（目录 + 文件，懒加载）
+		/// 仅操作 TreeView 节点，需在 UI 线程调用；索引应在后台由 BuildDirectoryTreeIndex 预先构建。
 		/// </summary>
 		public void PopulateDirectoryTree(JarFile jar)
 		{
@@ -283,66 +392,64 @@ namespace mre.view
 				return;
 			}
 
-			var dirs = jar.GetDirectoryTree(maxDepth: 4);
-			if (dirs.Count == 0)
-			{
-				treeDirectory.Nodes.Add(new TreeNode("（无可用目录结构）"));
-				return;
-			}
+			// 兜底：同步调用场景下未预先构建索引，则在此构建（会阻塞 UI，仅旧路径可能触发）
+			if (_treeSubdirs == null)
+				BuildDirectoryTreeIndex(jar);
 
-			// 单次遍历预计算每个目录的文件数（避免 O(N×M) 复杂度）
-			var dirFileCounts = new Dictionary<string, int>();
-			foreach (string entry in jar.AllEntries)
-			{
-				string normalized = entry.Replace('\\', '/');
-				if (normalized.EndsWith("/")) continue;
-				int lastSlash = normalized.LastIndexOf('/');
-				if (lastSlash > 0)
-				{
-					string dir = normalized.Substring(0, lastSlash + 1);
-					dirFileCounts.TryGetValue(dir, out int c);
-					dirFileCounts[dir] = c + 1;
-				}
-			}
-
-			// 使用 jar 文件名作为根节点
+			// 根节点
 			string rootLabel = jar.FullName ?? "jar 内容";
-			var root = new TreeNode(rootLabel) { ImageIndex = -1, SelectedImageIndex = -1 };
+			var root = new TreeNode(rootLabel) { Tag = "" };
 			treeDirectory.Nodes.Add(root);
+			AddChildrenToNode(root, "");
+			root.Expand();
+		}
 
-			// 从扁平的目录列表构建树形层级
-			var nodeMap = new Dictionary<string, TreeNode>();
+		/// <summary>
+		/// 加载某目录节点的直接子项（子目录 + 文件）
+		/// </summary>
+		private void AddChildrenToNode(TreeNode node, string dirPath)
+		{
+			node.Nodes.Clear();
 
-			foreach (string dirPath in dirs)
+			// 子目录
+			if (_treeSubdirs.TryGetValue(dirPath, out var subdirs))
 			{
-				string trimmed = dirPath.TrimEnd('/');
-				string[] parts = trimmed.Split('/');
-
-				TreeNode parent = root;
-				string accumulated = "";
-
-				foreach (string part in parts)
+				foreach (string subdir in subdirs)
 				{
-					if (string.IsNullOrEmpty(part)) continue;
-					accumulated += (accumulated == "" ? "" : "/") + part + "/";
+					string name = subdir.TrimEnd('/');
+					int idx = name.LastIndexOf('/');
+					name = idx >= 0 ? name.Substring(idx + 1) : name;
 
-					if (!nodeMap.TryGetValue(accumulated, out TreeNode existing))
-					{
-						dirFileCounts.TryGetValue(accumulated, out int fileCount);
-						string displayText = part + "/";
-						if (fileCount > 0)
-							displayText += "  (" + fileCount + " 个文件)";
-
-						existing = new TreeNode(displayText) { Tag = accumulated };
-						parent.Nodes.Add(existing);
-						nodeMap[accumulated] = existing;
-					}
-
-					parent = existing;
+					var child = new TreeNode(name + "/") { Tag = subdir };
+					if (DirHasChildren(subdir))
+						child.Nodes.Add(new TreeNode("...")); // 占位，让展开箭头出现
+					node.Nodes.Add(child);
 				}
 			}
 
-			root.Expand();
+			// 直接文件（最多展示 100 个，避免海量节点卡顿）
+			const int MAX_FILES = 100;
+			if (_treeFiles.TryGetValue(dirPath, out var files))
+			{
+				int shown = 0;
+				foreach (string f in files)
+				{
+					if (shown >= MAX_FILES) break;
+					node.Nodes.Add(new TreeNode(f) { Tag = dirPath + f });
+					shown++;
+				}
+				if (files.Count > MAX_FILES)
+					node.Nodes.Add(new TreeNode("… 还有 " + (files.Count - MAX_FILES) + " 个文件") { ForeColor = C_TEXT_SEC });
+			}
+		}
+
+		/// <summary>
+		/// 判断某目录是否有子项（子目录或文件）
+		/// </summary>
+		private bool DirHasChildren(string dirPath)
+		{
+			return (_treeSubdirs.TryGetValue(dirPath, out var d) && d.Count > 0)
+				|| (_treeFiles.TryGetValue(dirPath, out var f) && f.Count > 0);
 		}
 
 		/// <summary>
@@ -407,6 +514,176 @@ namespace mre.view
 
 			grbStep4.Controls.Add(lnkSelectAll);
 			grbStep4.Controls.Add(lnkDeselectAll);
+		}
+
+		/// <summary>
+		/// 初始化提取文件数预览标签（添加到 grbStep4）
+		/// </summary>
+		private void InitializeFileCountPreview()
+		{
+			lblFileCountPreview = new Label
+			{
+				Text = "",
+				AutoSize = true,
+				ForeColor = C_TEXT_SEC,
+				Font = new Font("Microsoft YaHei", 8.5F),
+				Location = new Point(6, 0)
+			};
+			grbStep4.Controls.Add(lblFileCountPreview);
+
+			// 勾选状态改变时实时刷新预计文件数（延迟到状态真正更新后）
+			chkResourceTypes.ItemCheck += (s, e) =>
+			{
+				BeginInvoke((MethodInvoker)UpdateFileCountPreview);
+			};
+		}
+
+		/// <summary>
+		/// 计算并显示勾选的资源类型预计提取的文件总数
+		/// </summary>
+		public void UpdateFileCountPreview()
+		{
+			if (lblFileCountPreview == null) return;
+
+			var jar = controller?.target?.Jar;
+			if (jar == null || jar.AllEntries == null || jar.AllEntries.Count == 0)
+			{
+				lblFileCountPreview.Text = "";
+				return;
+			}
+
+			int total = 0;
+			for (int i = 0; i < chkResourceTypes.Items.Count; i++)
+			{
+				if (chkResourceTypes.GetItemChecked(i))
+				{
+					var type = (ResourceType)chkResourceTypes.Items[i];
+					total += jar.CountResourceTypeFiles(type);
+				}
+			}
+
+			lblFileCountPreview.Text = total > 0
+				? "预计提取 " + total + " 个文件"
+				: "请勾选要提取的资源类型";
+		}
+
+		/// <summary>
+		/// 初始化拖放加载：拖入 .jar 文件或文件夹直接加载
+		/// </summary>
+		private void InitializeDragDrop()
+		{
+			// 关键：只给窗体设置 AllowDrop，并递归关闭所有子控件的 AllowDrop。
+			// 拖放事件会命中最深的 AllowDrop=true 控件；若给子容器（如 tlpMain）设置
+			// 但未绑定处理器，e.Effect 会保持 None，导致出现禁止符号。
+			// RichTextBox/TreeView 等控件也可能干扰，统一关闭。
+			SetAllowDropRecursively(this, false);
+			AllowDrop = true;
+
+			DragEnter += FrmMre_DragEnter;
+			DragDrop += FrmMre_DragDrop;
+		}
+
+		/// <summary>
+		/// 递归设置控件树中所有控件的 AllowDrop
+		/// </summary>
+		private void SetAllowDropRecursively(Control parent, bool value)
+		{
+			foreach (Control child in parent.Controls)
+			{
+				child.AllowDrop = value;
+				SetAllowDropRecursively(child, value);
+			}
+		}
+
+		private void FrmMre_DragEnter(object sender, DragEventArgs e)
+		{
+			if (!e.Data.GetDataPresent(DataFormats.FileDrop))
+			{
+				e.Effect = DragDropEffects.None;
+				return;
+			}
+
+			string[] paths = (string[])e.Data.GetData(DataFormats.FileDrop);
+			if (paths == null || paths.Length == 0)
+			{
+				e.Effect = DragDropEffects.None;
+				return;
+			}
+
+			// 检查所有拖入项是否都是 .jar 文件或文件夹
+			int jarCount = 0, dirCount = 0;
+			bool allValid = true;
+			foreach (string p in paths)
+			{
+				if (File.Exists(p) && p.ToLower().EndsWith(".jar"))
+					jarCount++;
+				else if (Directory.Exists(p))
+					dirCount++;
+				else
+					allValid = false;
+			}
+
+			if (allValid && (jarCount > 0 || dirCount > 0))
+			{
+				e.Effect = DragDropEffects.Copy;
+				if (jarCount > 1)
+					Status("松开鼠标加载 " + jarCount + " 个 jar 文件（批量模式）");
+				else if (jarCount == 1 && dirCount == 0)
+					Status("松开鼠标加载 jar 文件: " + paths[0]);
+				else
+					Status("松开鼠标加载 Mods 目录: " + paths[0]);
+			}
+			else
+			{
+				e.Effect = DragDropEffects.None;
+			}
+		}
+
+		private void FrmMre_DragDrop(object sender, DragEventArgs e)
+		{
+			string[] paths = (string[])e.Data.GetData(DataFormats.FileDrop);
+			if (paths == null || paths.Length == 0)
+				return;
+
+			// 分类：区分 jar 文件和文件夹
+			var jarFiles = new List<string>();
+			var dirs = new List<string>();
+			foreach (string p in paths)
+			{
+				if (File.Exists(p) && p.ToLower().EndsWith(".jar"))
+					jarFiles.Add(p);
+				else if (Directory.Exists(p))
+					dirs.Add(p);
+			}
+
+			if (jarFiles.Count == 1 && dirs.Count == 0)
+			{
+				// 单个 jar：切到「从 jar 文件提取」模式
+				rdbExJar.Checked = true;
+				Log("拖放加载 jar 文件: " + jarFiles[0]);
+				controller.LoadJarFile(jarFiles[0]);
+			}
+			else if (jarFiles.Count > 0)
+			{
+				// 多个 jar：切到「批量提取 Mod」模式，直接加载全部
+				rdbExMods.Checked = true;
+				Log("拖放加载 " + jarFiles.Count + " 个 jar 文件（批量模式）");
+				controller.LoadJarFiles(jarFiles);
+			}
+			else if (dirs.Count > 0)
+			{
+				// 文件夹：切到「批量提取 Mod」模式（取第一个文件夹）
+				rdbExMods.Checked = true;
+				txtModsDir.Text = dirs[0];
+				controller.settings.LastBatchInputPath = dirs[0];
+				controller.settings.SaveConfig();
+				Log("拖放加载 Mods 目录: " + dirs[0]);
+				controller.LoadModsDirectory(dirs[0]);
+			}
+			else
+			{
+				MessageBox.Show("仅支持拖放 .jar 文件或文件夹。", "提示", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+			}
 		}
 
 		/// <summary>
@@ -639,29 +916,25 @@ namespace mre.view
 			{
 				Log("正在开始 jar 提取，这可能需要一些时间，请耐心等待...");
 
-				bool hasResourceTypeSelection = false;
+				var selectedTypes = new List<ResourceType>();
+				var selectedFolders = new List<string>();
+
 				for (int i = 0; i < chkResourceTypes.Items.Count; i++)
 				{
 					if (chkResourceTypes.GetItemChecked(i))
-					{
-						hasResourceTypeSelection = true;
-						ResourceType type = (ResourceType)chkResourceTypes.Items[i];
-						controller.ExtractResourceType(type);
-					}
+						selectedTypes.Add((ResourceType)chkResourceTypes.Items[i]);
 				}
 
-				if (!hasResourceTypeSelection)
+				if (selectedTypes.Count == 0)
 				{
 					for (int i = 0; i < chkExtFolders.Items.Count; i++)
 					{
 						if (chkExtFolders.GetItemChecked(i))
-						{
-							controller.ExtractJarFolder(chkExtFolders.Items[i].ToString());
-						}
+							selectedFolders.Add(chkExtFolders.Items[i].ToString());
 					}
 				}
 
-				Log("成功从 jar 文件中提取内容！您的文件位于 " + controller.GetOutputPath() + " 文件夹中。", "DarkGreen");
+				controller.ExtractSelectedResources(selectedTypes, selectedFolders);
 			}
 			if (!rdbExJar.Checked && chkExtGroups.GetItemChecked(1))
 			{
@@ -734,6 +1007,13 @@ namespace mre.view
 		public void LayoutStep4Controls()
 		{
 			int y = chkResourceTypes.Bottom + 8;
+
+			// 文件数预览标签（如果有）
+			if (lblFileCountPreview != null)
+			{
+				lblFileCountPreview.Top = y - 2;
+				y = lblFileCountPreview.Bottom + 4;
+			}
 
 			lblOutputPath.Top = y;
 			y = lblOutputPath.Bottom + 2;

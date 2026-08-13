@@ -148,6 +148,9 @@
     <Compile Include="view\FrmMre.cs">
       <SubType>Form</SubType>
     </Compile>
+    <Compile Include="view\FrmProgress.cs">
+      <SubType>Form</SubType>
+    </Compile>
     <Compile Include="view\FrmMre.Designer.cs">
       <DependentUpon>FrmMre.cs</DependentUpon>
     </Compile>

@@ -23,6 +23,15 @@ namespace mre.model
 		}
 
 		/// <summary>
+		/// 设置自定义显示名称（用于批量模式目录树根节点显示）
+		/// </summary>
+		public void SetDisplayName(string displayName)
+		{
+			FullName = displayName;
+			Name = displayName;
+		}
+
+		/// <summary>
 		/// 外部设置 AllEntries（用于聚合多个 jar 的条目）
 		/// </summary>
 		public void SetAllEntries(List<string> entries)
@@ -47,6 +56,44 @@ namespace mre.model
 						AllEntries.Add(entry.FullName);
 				}
 			}
+		}
+
+		/// <summary>
+		/// 快速加载 jar 全部内容（文件条目 + 顶层文件夹），并更新资源类型路径。
+		/// 等价于 ListJarFolders() 但使用 ZipArchive，避免启动 Java 进程导致卡顿。
+		/// </summary>
+		public void ListJarContentsFast()
+		{
+			AllEntries = new List<string>();
+			Folders = new List<string>();
+
+			using (var archive = ZipFile.OpenRead(Path))
+			{
+				foreach (var entry in archive.Entries)
+				{
+					// 跳过目录条目（entry.Name 为空）
+					if (string.IsNullOrEmpty(entry.Name))
+						continue;
+
+					string fullName = entry.FullName;
+					AllEntries.Add(fullName);
+
+					// 顶层文件夹判定，逻辑与 ListJarFolders 一致
+					if (!fullName.Contains("META-INF")
+						&& !fullName.Contains(".class")
+						&& !fullName.Contains(".mcassetsroot")
+						&& !fullName.Contains(".xml")
+						&& fullName.Contains('/')
+						&& fullName.Contains('.'))
+					{
+						string folder = fullName.Substring(0, fullName.IndexOf('/'));
+						if (!Folders.Contains(folder) && folder.Length < 64)
+							Folders.Add(folder);
+					}
+				}
+			}
+
+			ResourceTypes.UpdateJarPaths(AllEntries);
 		}
 
 		public List<string> ListJarFolders(string javaPath, FrmMre view)

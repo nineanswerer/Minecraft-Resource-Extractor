@@ -179,20 +179,47 @@ namespace mre.controller
 		}
 
 		/// <summary>
-		/// 加载指定的 jar 文件（支持手动输入路径）
+		/// 加载指定的 jar 文件（支持手动输入路径，后台线程扫描避免 UI 卡死）
 		/// </summary>
 		public void LoadJarFile(string filePath)
 		{
 			target = new Target();
 			target.Jar = new JarFile(filePath);
 			view.txtPath.Text = filePath;
-			view.FillCheckedBox(view.chkExtFolders, target.Jar.ListJarFolders(settings.JavaPath, view));
-			view.SetCheckAll(view.chkExtFolders, true);
-			FillResourceTypes();
-			view.Log("已加载 jar 文件，请选择要提取的文件夹或资源类型。");
-			view.Log("找到 " + target.Jar.AllEntries.Count + " 个文件，可用资源类型 " + view.chkResourceTypes.Items.Count + " 种。");
-			view.PopulateDirectoryTree(target.Jar);
-			StepsController.Step4(view);
+
+			view.Cursor = Cursors.WaitCursor;
+			Task.Run(() =>
+			{
+				try
+				{
+					// 快速扫描（ZipArchive，不启动 Java 进程）
+					target.Jar.ListJarContentsFast();
+
+					// 后台构建目录树索引，避免在 UI 线程遍历海量条目
+					view.Status("正在生成目录树...");
+					view.BuildDirectoryTreeIndex(target.Jar);
+
+					view.BeginInvoke((MethodInvoker)(() =>
+					{
+						view.FillCheckedBox(view.chkExtFolders, target.Jar.Folders);
+						view.SetCheckAll(view.chkExtFolders, true);
+						FillResourceTypes();
+						view.Log("已加载 jar 文件，请选择要提取的文件夹或资源类型。");
+						view.Log("找到 " + target.Jar.AllEntries.Count + " 个文件，可用资源类型 " + view.chkResourceTypes.Items.Count + " 种。");
+						view.PopulateDirectoryTree(target.Jar);
+						StepsController.Step4(view);
+					}));
+				}
+				catch (Exception ex)
+				{
+					view.BeginInvoke((MethodInvoker)(() =>
+						view.Log("加载 jar 文件失败: " + ex.Message, "DarkRed")));
+				}
+				finally
+				{
+					view.BeginInvoke((MethodInvoker)(() => view.Cursor = Cursors.Default));
+				}
+			});
 		}
 
 		public void FindVersionJar(string version)
@@ -278,29 +305,54 @@ namespace mre.controller
 			});
 		}
 
-		public void ExtractJarFolder(string folder)
+		/// <summary>
+		/// 异步提取选中的资源类型和文件夹（后台线程，避免 UI 卡死）
+		/// </summary>
+		public void ExtractSelectedResources(List<ResourceType> types, List<string> folders)
 		{
-			view.Status("正在从 jar 中提取文件夹 " + folder + " ...");
 			view.SwitchUiLock(4);
-			target.Jar.ExtractJarFolder(folder, settings);
-			view.SwitchUiLock(4);
-			view.Status("Jar 提取完成");
-		}
+			view.pgbProgress.Style = ProgressBarStyle.Marquee;
 
-		public void ExtractResourceType(ResourceType type)
-		{
-			string displayName = ResourceTypes.GetDisplayName(type);
-			view.Status("正在提取 " + displayName + " ...");
-			view.SwitchUiLock(4);
-			try
+			Task.Run(() =>
 			{
-				target.Jar.ExtractResourceType(type, settings);
-			}
-			finally
-			{
-				view.SwitchUiLock(4);
-			}
-			view.Status(displayName + " 提取完成");
+				try
+				{
+					if (types != null && types.Count > 0)
+					{
+						foreach (ResourceType type in types)
+						{
+							string displayName = ResourceTypes.GetDisplayName(type);
+							view.Status("正在提取 " + displayName + " ...");
+							target.Jar.ExtractResourceType(type, settings);
+						}
+					}
+
+					if (folders != null && folders.Count > 0)
+					{
+						foreach (string folder in folders)
+						{
+							view.Status("正在从 jar 中提取文件夹 " + folder + " ...");
+							target.Jar.ExtractJarFolder(folder, settings);
+						}
+					}
+
+					view.Log("成功从 jar 文件中提取内容！您的文件位于 " + GetOutputPath() + " 文件夹中。", "DarkGreen");
+				}
+				catch (Exception ex)
+				{
+					view.Log("提取发生错误: " + ex.Message, "DarkRed");
+				}
+				finally
+				{
+					view.BeginInvoke((MethodInvoker)(() =>
+					{
+						view.pgbProgress.Style = ProgressBarStyle.Continuous;
+						view.pgbProgress.Value = 0;
+						view.SwitchUiLock(4);
+						view.Status("提取完成");
+					}));
+				}
+			});
 		}
 
 		public void FillResourceTypes()
@@ -335,6 +387,9 @@ namespace mre.controller
 
 			// 动态调整下方控件位置，防止覆盖
 			view.LayoutStep4Controls();
+
+			// 刷新预计提取文件数
+			view.UpdateFileCountPreview();
 		}
 
 		public string GetOutputPath()
@@ -428,36 +483,90 @@ namespace mre.controller
 				return;
 			}
 
-			view.Log("在 " + dir + " 中发现 " + jars.Count + " 个 .jar 文件。");
-
-			// 存储扫描结果供后续提取使用
 			_currentBatchDir = dir;
-			_currentBatchJars = jars;
+			view.Log("在 " + dir + " 中发现 " + jars.Count + " 个 .jar 文件。");
+			LoadJarFiles(jars);
+		}
 
-			// 从所有 jar 中聚合资源类型信息，填充步骤4的选择列表
-			AggregateResourceTypesFromJars(jars);
-			FillResourceTypes();
+		/// <summary>
+		/// 加载一组 jar 文件并准备批量提取（供 Mods 目录扫描或拖放多个文件使用）
+		/// 弹出进度窗口，后台并行扫描 + 构建目录树索引，完成后回填 UI。
+		/// </summary>
+		public void LoadJarFiles(List<string> jarPaths)
+		{
+			if (jarPaths == null || jarPaths.Count == 0)
+			{
+				view.Log("没有可加载的 jar 文件。", "DarkRed");
+				return;
+			}
 
-			view.Log("输出目录: " + GetOutputPath());
-			view.Log("请在上方勾选要提取的资源类型，然后点击[确认]按钮开始批量提取。");
+			_currentBatchJars = jarPaths;
 
-			view.PopulateDirectoryTree(target?.Jar);
-			StepsController.Step4(view);
+			// 弹出进度窗口
+			var dlg = new FrmProgress("正在加载 Mod 资源");
+			dlg.SetRange(0, Math.Max(1, jarPaths.Count));
+			dlg.SetMessage("正在扫描 " + jarPaths.Count + " 个 jar 文件...");
+
+			view.Enabled = false;
+			dlg.Show(view);
+
+			// 后台执行扫描 + 目录树索引构建（不阻塞 UI）
+			Task.Run(() =>
+			{
+				try
+				{
+					AggregateResourceTypesFromJars(jarPaths, dlg);
+
+					dlg.BeginInvoke((MethodInvoker)(() =>
+					{
+						dlg.SetMarquee(true);
+						dlg.SetMessage("正在生成目录树...");
+					}));
+					view.BuildDirectoryTreeIndex(target?.Jar);
+				}
+				catch (Exception ex)
+				{
+					view.Log("加载 jar 失败: " + ex.Message, "DarkRed");
+				}
+				finally
+				{
+					dlg.BeginInvoke((MethodInvoker)(() =>
+					{
+						dlg.Close();
+						dlg.Dispose();
+						view.Enabled = true;
+
+						FillResourceTypes();
+
+						// 批量模式目录树根节点显示为聚合信息
+						if (target?.Jar != null)
+							target.Jar.SetDisplayName("批量 Mod（" + jarPaths.Count + " 个 jar）");
+
+						view.Log("输出目录: " + GetOutputPath());
+						view.Log("请在上方勾选要提取的资源类型，然后点击[确认]按钮开始批量提取。");
+
+						view.PopulateDirectoryTree(target?.Jar);
+						StepsController.Step4(view);
+					}));
+				}
+			});
 		}
 
 		/// <summary>
 		/// 从扫描到的所有 jar 文件中聚合资源类型路径信息（并行 + ZipArchive 快速扫描）
-		/// 性能：200 个 jar 从 ~60 秒降至 ~2 秒
+		/// 性能：200 个 jar 从 ~60 秒降至 ~2 秒；进度通过 dlg 回传到进度弹窗
 		/// </summary>
-		private void AggregateResourceTypesFromJars(List<string> jarPaths)
+		private void AggregateResourceTypesFromJars(List<string> jarPaths, FrmProgress dlg)
 		{
-			view.Status("正在并行扫描 " + jarPaths.Count + " 个 jar 文件...");
-
 			var resultLists = new ConcurrentBag<List<string>>();
 			int scanned = 0;
 			int failed = 0;
+			int total = jarPaths.Count;
 
-			Parallel.ForEach(jarPaths, new ParallelOptions { MaxDegreeOfParallelism = Environment.ProcessorCount }, jarPath =>
+			// 预留一个核给 UI 线程，避免全核并行导致界面冻结
+			int maxParallel = Math.Max(1, Environment.ProcessorCount - 1);
+
+			Parallel.ForEach(jarPaths, new ParallelOptions { MaxDegreeOfParallelism = maxParallel }, jarPath =>
 			{
 				try
 				{
@@ -472,9 +581,15 @@ namespace mre.controller
 				}
 
 				int current = Interlocked.Increment(ref scanned);
-				if (current % 10 == 0 || current == jarPaths.Count)
-					view.BeginInvoke((MethodInvoker)(() =>
-						view.Status("扫描进度: " + current + "/" + jarPaths.Count + " ...")));
+				if (current == 1 || current % 5 == 0 || current == total)
+				{
+					int c = current;
+					dlg.BeginInvoke((MethodInvoker)(() =>
+					{
+						dlg.SetValue(c);
+						dlg.SetMessage("正在扫描 " + c + "/" + total + " 个 jar ...");
+					}));
+				}
 			});
 
 			// 合并所有列表（单线程，快速）
@@ -484,16 +599,21 @@ namespace mre.controller
 			if (failed > 0)
 				view.Log(failed + " 个 jar 文件无法读取，已跳过", "Orange");
 
-			view.Status("扫描完成！共发现 " + allEntriesList.Count + " 个文件条目（来自 " + (jarPaths.Count - failed) + " 个 jar）");
+			view.Log("扫描完成！共发现 " + allEntriesList.Count + " 个文件条目（来自 " + (total - failed) + " 个 jar）");
 
-			// 更新全局资源类型路径
-			if (allEntriesList.Count > 0)
-				ResourceTypes.UpdateJarPaths(allEntriesList);
+			// 分析资源类型（SetAllEntries 内部会调用 UpdateJarPaths）
+			dlg.BeginInvoke((MethodInvoker)(() =>
+			{
+				dlg.SetMarquee(true);
+				dlg.SetMessage("正在分析资源类型...");
+			}));
 
-			// 同时存储聚合信息到第一个有效的 jar（供 FillResourceTypes 和目录树使用）
+			// 存储聚合信息（供 FillResourceTypes 和目录树使用）
+			// 注意：必须无条件覆盖 target.Jar，否则之前加载过单 jar 后 target.Jar 非空，
+			// 再拖入文件夹时目录树不会更新成聚合条目
 			if (target == null)
 				target = new Target();
-			if (target.Jar == null && jarPaths.Count > 0)
+			if (jarPaths.Count > 0)
 			{
 				try
 				{
@@ -607,7 +727,7 @@ namespace mre.controller
 		private List<string> _currentBatchJars;
 
 		/// <summary>
-		/// 按选中的资源类型执行批量提取
+		/// 按选中的资源类型执行批量提取（后台线程，避免 UI 卡死）
 		/// </summary>
 		public void RunBatchExtractionFiltered(string inputDir, string outputDir, List<ResourceType> selectedTypes)
 		{
@@ -618,127 +738,135 @@ namespace mre.controller
 			}
 
 			bool groupByType = view.chkGroupByType != null && view.chkGroupByType.Checked;
-			view.SwitchUiLock(4);
-			try
-			{
 			int totalJars = _currentBatchJars.Count;
 			int totalSteps = totalJars * selectedTypes.Count;
-			int currentStep = 0;
-			int successCount = 0;
-			var conflicts = new Dictionary<string, List<string>>();
 
+			view.SwitchUiLock(4);
 			view.pgbProgress.Style = ProgressBarStyle.Blocks;
-			view.pgbProgress.Minimum = 0;
-			view.pgbProgress.Maximum = totalSteps;
-			view.pgbProgress.Value = 0;
+			view.SetProgressRange(0, Math.Max(1, totalSteps));
 
-			for (int i = 0; i < _currentBatchJars.Count; i++)
+			Task.Run(() =>
 			{
-				string jarPath = _currentBatchJars[i];
-				string jarName = System.IO.Path.GetFileName(jarPath);
-				view.Status("正在处理: " + jarName + " (" + (i + 1) + "/" + totalJars + ") ...");
-
 				try
 				{
-					var jar = new JarFile(jarPath);
-					jar.ListJarFolders(settings.JavaPath, view);
+					int currentStep = 0;
+					int successCount = 0;
+					var conflicts = new Dictionary<string, List<string>>();
 
-					// 检测冲突
-					if (jar.AllEntries != null)
+					for (int i = 0; i < _currentBatchJars.Count; i++)
 					{
-						foreach (string entry in jar.AllEntries)
+						string jarPath = _currentBatchJars[i];
+						string jarName = System.IO.Path.GetFileName(jarPath);
+						view.Status("正在处理: " + jarName + " (" + (i + 1) + "/" + totalJars + ") ...");
+
+						try
 						{
-							string normalized = entry.Replace('\\', '/');
-							if (!conflicts.ContainsKey(normalized))
-								conflicts[normalized] = new List<string>();
-							if (!conflicts[normalized].Contains(jarName))
-								conflicts[normalized].Add(jarName);
+							var jar = new JarFile(jarPath);
+							jar.ListJarEntriesFast();
+
+							// 检测冲突
+							if (jar.AllEntries != null)
+							{
+								foreach (string entry in jar.AllEntries)
+								{
+									string normalized = entry.Replace('\\', '/');
+									if (!conflicts.ContainsKey(normalized))
+										conflicts[normalized] = new List<string>();
+									if (!conflicts[normalized].Contains(jarName))
+										conflicts[normalized].Add(jarName);
+								}
+							}
+
+							// 按选中的资源类型提取
+							foreach (ResourceType type in selectedTypes)
+							{
+								string typeName = ResourceTypes.GetDisplayName(type);
+								view.Status("正在提取: " + jarName + " → " + typeName + " (" + (currentStep + 1) + "/" + totalSteps + ")");
+
+								if (groupByType)
+									jar.ExtractResourceType(type, settings, typeName);
+								else
+									jar.ExtractResourceType(type, settings);
+
+								currentStep++;
+								view.SetProgress(currentStep);
+							}
+
+							successCount++;
+							view.Log("  ✓ " + jarName + " 提取完成", "DarkGreen");
+						}
+						catch (System.Exception ex)
+						{
+							// 跳过已失败的类型，但仍更新进度
+							currentStep += selectedTypes.Count;
+							if (currentStep > totalSteps) currentStep = totalSteps;
+							view.SetProgress(currentStep);
+							view.Log("  ✗ " + jarName + " 提取失败: " + ex.Message, "DarkRed");
 						}
 					}
 
-					// 按选中的资源类型提取
-					foreach (ResourceType type in selectedTypes)
+					// 统计冲突
+					var actualConflicts = new List<ConflictEntry>();
+					foreach (var kvp in conflicts)
 					{
-						string typeName = ResourceTypes.GetDisplayName(type);
-						view.Status("正在提取: " + jarName + " → " + typeName + " (" + (currentStep + 1) + "/" + totalSteps + ")");
+						if (kvp.Value.Count >= 2)
+						{
+							actualConflicts.Add(new ConflictEntry
+							{
+								AssetPath = kvp.Key,
+								SourceJars = kvp.Value
+							});
+						}
+					}
+					actualConflicts = actualConflicts
+						.OrderByDescending(c => c.SourceJars.Count)
+						.ThenBy(c => c.AssetPath)
+						.ToList();
 
-						if (groupByType)
-							jar.ExtractResourceType(type, settings, typeName);
-						else
-							jar.ExtractResourceType(type, settings);
-
-						currentStep++;
-						view.pgbProgress.Value = currentStep;
+					// 保存冲突报告
+					if (actualConflicts.Count > 0)
+					{
+						var result = new BatchResult
+						{
+							OutputDirectory = outputDir,
+							TotalJars = totalJars,
+							SuccessfulJars = successCount,
+							FailedJars = totalJars - successCount,
+							TotalAssetsExtracted = currentStep,
+							ConflictCount = actualConflicts.Count,
+							Conflicts = actualConflicts
+						};
+						result.SaveToFile(outputDir);
+						view.Log("⚠ 检测到 " + actualConflicts.Count + " 个资源冲突，详情见 conflict_report.json", "Orange");
+					}
+					else
+					{
+						view.Log("✓ 未检测到资源冲突", "DarkGreen");
 					}
 
-					successCount++;
-					view.Log("  ✓ " + jarName + " 提取完成", "DarkGreen");
-				}
-				catch (System.Exception ex)
-				{
-					// 跳过已失败的类型，但仍更新进度
-					currentStep += selectedTypes.Count;
-					if (currentStep > totalSteps) currentStep = totalSteps;
-					try { view.pgbProgress.Value = currentStep; } catch { }
-					view.Log("  ✗ " + jarName + " 提取失败: " + ex.Message, "DarkRed");
-				}
-			}
+					view.Log("═══════════════════════════════════════");
+					view.Log("  批量提取完成！成功: " + successCount + "/" + totalJars, "DarkGreen");
+					view.Log("═══════════════════════════════════════");
 
-			// 统计冲突
-			var actualConflicts = new List<ConflictEntry>();
-			foreach (var kvp in conflicts)
-			{
-				if (kvp.Value.Count >= 2)
+					view.Status("批量提取完成！");
+
+					System.Diagnostics.Process.Start("explorer.exe", outputDir);
+				}
+				catch (Exception ex)
 				{
-					actualConflicts.Add(new ConflictEntry
+					view.Log("批量提取发生错误: " + ex.Message, "DarkRed");
+				}
+				finally
+				{
+					view.BeginInvoke((MethodInvoker)(() =>
 					{
-						AssetPath = kvp.Key,
-						SourceJars = kvp.Value
-					});
+						view.pgbProgress.Style = ProgressBarStyle.Continuous;
+						view.pgbProgress.Value = 0;
+						view.SwitchUiLock(4);
+						view.Cursor = System.Windows.Forms.Cursors.Default;
+					}));
 				}
-			}
-			actualConflicts = actualConflicts
-				.OrderByDescending(c => c.SourceJars.Count)
-				.ThenBy(c => c.AssetPath)
-				.ToList();
-
-			// 保存冲突报告
-			if (actualConflicts.Count > 0)
-			{
-				var result = new BatchResult
-				{
-					OutputDirectory = outputDir,
-					TotalJars = totalJars,
-					SuccessfulJars = successCount,
-					FailedJars = totalJars - successCount,
-					TotalAssetsExtracted = currentStep,
-					ConflictCount = actualConflicts.Count,
-					Conflicts = actualConflicts
-				};
-				result.SaveToFile(outputDir);
-				view.Log("⚠ 检测到 " + actualConflicts.Count + " 个资源冲突，详情见 conflict_report.json", "Orange");
-			}
-			else
-			{
-				view.Log("✓ 未检测到资源冲突", "DarkGreen");
-			}
-
-			view.Log("═══════════════════════════════════════");
-			view.Log("  批量提取完成！成功: " + successCount + "/" + totalJars, "DarkGreen");
-			view.Log("═══════════════════════════════════════");
-
-			view.pgbProgress.Style = ProgressBarStyle.Continuous;
-			view.pgbProgress.Value = 0;
-			view.Status("批量提取完成！");
-
-			System.Diagnostics.Process.Start("explorer.exe", outputDir);
-			}
-			finally
-			{
-				view.SwitchUiLock(4);
-				view.pgbProgress.Style = ProgressBarStyle.Continuous;
-				view.Cursor = System.Windows.Forms.Cursors.Default;
-			}
+			});
 		}
 	}
 }
