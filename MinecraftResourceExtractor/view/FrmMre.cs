@@ -15,6 +15,9 @@ namespace mre.view
 	{
 		public Controller controller { get; }
 		public CheckBox chkGroupByType;  // 按资源类型分类输出
+		public CheckBox chkGeneratePackMcMeta;  // 生成 pack.mcmeta
+		public ComboBox cmbPackFormat;          // 目标 MC 版本
+		private Label lblPackFormat;
 		private SplitContainer splitHelp;
 		private TreeView treeDirectory;
 		private Label lblFileCountPreview;
@@ -38,6 +41,7 @@ namespace mre.view
 			InitializeComponent();
 			InitializeModsPanel();
 			InitializeOutputOptions();
+			InitializePackMcMetaOptions();
 			InitializeSelectAllLinks();
 			InitializeDirectoryTree();
 			InitializeFileCountPreview();
@@ -216,7 +220,8 @@ namespace mre.view
 
 		public void SwitchUiLock(int step)
 		{
-			Cursor = Cursor.Current == Cursors.Default ? Cursors.WaitCursor : Cursors.Default;
+			// 依据窗体自身光标 toggle（不能用 Cursor.Current 全局光标判断，否则会永远设成等待）
+			Cursor = (Cursor == Cursors.WaitCursor) ? Cursors.Default : Cursors.WaitCursor;
 			if (step >= 4)
 				grbStep4.Enabled = !grbStep4.Enabled;
 			if (step >= 3)
@@ -473,6 +478,56 @@ namespace mre.view
 					Log("输出结构：按模组名 → 资源内容");
 			};
 			grbStep4.Controls.Add(chkGroupByType);
+		}
+
+		/// <summary>
+		/// 初始化 pack.mcmeta 生成选项（复选框 + 目标 MC 版本下拉框）
+		/// </summary>
+		private void InitializePackMcMetaOptions()
+		{
+			chkGeneratePackMcMeta = new CheckBox
+			{
+				Text = "生成 pack.mcmeta（让输出目录成为可用的资源包）",
+				Location = new System.Drawing.Point(6, 208),
+				Size = new System.Drawing.Size(360, 17),
+				Checked = true
+			};
+			chkGeneratePackMcMeta.CheckedChanged += (s, e) =>
+			{
+				bool on = chkGeneratePackMcMeta.Checked;
+				if (lblPackFormat != null) lblPackFormat.Enabled = on;
+				if (cmbPackFormat != null) cmbPackFormat.Enabled = on;
+			};
+			grbStep4.Controls.Add(chkGeneratePackMcMeta);
+
+			lblPackFormat = new Label
+			{
+				Text = "目标 MC 版本：",
+				Location = new System.Drawing.Point(24, 230),
+				AutoSize = true,
+				ForeColor = C_TEXT_SEC
+			};
+			grbStep4.Controls.Add(lblPackFormat);
+
+			cmbPackFormat = new ComboBox
+			{
+				Location = new System.Drawing.Point(120, 226),
+				Width = 120,
+				DropDownStyle = ComboBoxStyle.DropDown
+			};
+			cmbPackFormat.Items.AddRange(PackMcMeta.SupportedVersions);
+			cmbPackFormat.Text = PackMcMeta.DefaultVersion;
+			grbStep4.Controls.Add(cmbPackFormat);
+		}
+
+		/// <summary>
+		/// 设置目标 MC 版本（由 Controller 在加载 jar 后自动检测并填充）
+		/// </summary>
+		public void SetPackVersion(string version)
+		{
+			if (cmbPackFormat == null || string.IsNullOrEmpty(version))
+				return;
+			cmbPackFormat.Text = version;
 		}
 
 		/// <summary>
@@ -1028,6 +1083,20 @@ namespace mre.view
 			{
 				chkGroupByType.Top = y;
 				y = chkGroupByType.Bottom + 8;
+			}
+
+			// pack.mcmeta 生成选项
+			if (chkGeneratePackMcMeta != null)
+			{
+				chkGeneratePackMcMeta.Top = y;
+				y = chkGeneratePackMcMeta.Bottom + 6;
+
+				if (lblPackFormat != null && cmbPackFormat != null)
+				{
+					cmbPackFormat.Top = y;
+					lblPackFormat.Top = y + 3;
+					y = cmbPackFormat.Bottom + 8;
+				}
 			}
 
 			btnConfirm4.Top = y;

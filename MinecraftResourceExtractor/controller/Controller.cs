@@ -204,6 +204,15 @@ namespace mre.controller
 						view.FillCheckedBox(view.chkExtFolders, target.Jar.Folders);
 						view.SetCheckAll(view.chkExtFolders, true);
 						FillResourceTypes();
+
+						// 自动检测 MC 版本并填充 pack 版本下拉框
+						string detected = PackMcMeta.DetectMcVersion(target.Jar.FullName);
+						if (!string.IsNullOrEmpty(detected))
+						{
+							view.SetPackVersion(detected);
+							view.Log("已自动检测到 MC 版本 " + detected + "，将生成对应 pack.mcmeta。");
+						}
+
 						view.Log("已加载 jar 文件，请选择要提取的文件夹或资源类型。");
 						view.Log("找到 " + target.Jar.AllEntries.Count + " 个文件，可用资源类型 " + view.chkResourceTypes.Items.Count + " 种。");
 						view.PopulateDirectoryTree(target.Jar);
@@ -313,6 +322,12 @@ namespace mre.controller
 			view.SwitchUiLock(4);
 			view.pgbProgress.Style = ProgressBarStyle.Marquee;
 
+			// 在 UI 线程读取 pack.mcmeta 生成选项（后台线程只用副本，避免跨线程访问控件）
+			bool generatePack = view.chkGeneratePackMcMeta != null && view.chkGeneratePackMcMeta.Checked;
+			string packVersion = (view.cmbPackFormat != null && view.cmbPackFormat.SelectedItem != null)
+				? view.cmbPackFormat.SelectedItem.ToString()
+				: PackMcMeta.DefaultVersion;
+
 			Task.Run(() =>
 			{
 				try
@@ -336,6 +351,14 @@ namespace mre.controller
 						}
 					}
 
+					// 生成 pack.mcmeta（可选，让输出目录成为可用资源包）
+					if (generatePack)
+					{
+						string packDir = Path.Combine(GetOutputPath(), target.Jar.Name);
+						PackMcMeta.Generate(packDir, packVersion);
+						view.Log("已生成 pack.mcmeta（" + PackMcMeta.DescribeFormat(packVersion) + "）", "DarkGreen");
+					}
+
 					view.Log("成功从 jar 文件中提取内容！您的文件位于 " + GetOutputPath() + " 文件夹中。", "DarkGreen");
 				}
 				catch (Exception ex)
@@ -349,6 +372,7 @@ namespace mre.controller
 						view.pgbProgress.Style = ProgressBarStyle.Continuous;
 						view.pgbProgress.Value = 0;
 						view.SwitchUiLock(4);
+						view.Cursor = Cursors.Default;
 						view.Status("提取完成");
 					}));
 				}
@@ -537,6 +561,14 @@ namespace mre.controller
 						view.Enabled = true;
 
 						FillResourceTypes();
+
+						// 自动检测 MC 版本（用第一个 jar 的文件名）
+						string detected = PackMcMeta.DetectMcVersion(System.IO.Path.GetFileName(jarPaths[0]));
+						if (!string.IsNullOrEmpty(detected))
+						{
+							view.SetPackVersion(detected);
+							view.Log("已自动检测到 MC 版本 " + detected + "，将生成对应 pack.mcmeta。");
+						}
 
 						// 批量模式目录树根节点显示为聚合信息
 						if (target?.Jar != null)
@@ -738,6 +770,10 @@ namespace mre.controller
 			}
 
 			bool groupByType = view.chkGroupByType != null && view.chkGroupByType.Checked;
+			bool generatePack = view.chkGeneratePackMcMeta != null && view.chkGeneratePackMcMeta.Checked;
+			string packVersion = (view.cmbPackFormat != null && view.cmbPackFormat.SelectedItem != null)
+				? view.cmbPackFormat.SelectedItem.ToString()
+				: PackMcMeta.DefaultVersion;
 			int totalJars = _currentBatchJars.Count;
 			int totalSteps = totalJars * selectedTypes.Count;
 
@@ -793,6 +829,11 @@ namespace mre.controller
 							}
 
 							successCount++;
+
+							// 未分类输出时，每个 jar 目录都是一个资源包，生成 pack.mcmeta
+							if (generatePack && !groupByType)
+								PackMcMeta.Generate(System.IO.Path.Combine(outputDir, jar.Name), packVersion);
+
 							view.Log("  ✓ " + jarName + " 提取完成", "DarkGreen");
 						}
 						catch (System.Exception ex)
