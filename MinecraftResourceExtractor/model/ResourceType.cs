@@ -31,6 +31,8 @@ namespace mre.model
 		public List<string> MatchDirs { get; set; }
 		/// <summary>用于提取的路径前缀（在 jar 中动态匹配后填充）</summary>
 		public List<string> JarPaths { get; set; }
+		/// <summary>可选：文件后缀过滤器（如 ".mcmeta"）。设置后只提取匹配该后缀的文件，而非整个目录</summary>
+		public string FileSuffix { get; set; }
 		public string Description { get; set; }
 
 		public ResourceTypeInfo(ResourceType type, string displayName, string description, params string[] matchDirs)
@@ -60,7 +62,7 @@ namespace mre.model
 			new ResourceTypeInfo(ResourceType.护甲纹理, "护甲纹理", "护甲层纹理", "textures/models/armor", "models/armor"),
 			new ResourceTypeInfo(ResourceType.地图图标, "地图图标", "地图图标", "textures/map"),
 			new ResourceTypeInfo(ResourceType.着色器, "着色器", "着色器程序", "shaders"),
-			new ResourceTypeInfo(ResourceType.动画配置, "动画配置", "动画定义（.mcmeta 文件）", "textures"),
+			new ResourceTypeInfo(ResourceType.动画配置, "动画配置", "动画定义（.mcmeta 文件）", "textures") { FileSuffix = ".mcmeta" },
 			new ResourceTypeInfo(ResourceType.附魔闪光, "附魔闪光", "附魔闪光等效果", "textures/glint", "glint"),
 			new ResourceTypeInfo(ResourceType.工具纹理, "工具纹理", "工具纹理", "textures/tools", "textures/trident"),
 		};
@@ -107,6 +109,16 @@ namespace mre.model
 					}
 				}
 			}
+		}
+
+		public static ResourceTypeInfo GetInfo(ResourceType type)
+		{
+			foreach (var info in AllTypes)
+			{
+				if (info.Type == type)
+					return info;
+			}
+			return null;
 		}
 
 		public static List<string> GetJarPathsForType(ResourceType type)

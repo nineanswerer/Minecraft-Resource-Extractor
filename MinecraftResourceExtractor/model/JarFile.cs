@@ -1,4 +1,5 @@
 using mre.view;
+using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
@@ -155,8 +156,14 @@ namespace mre.model
 			var available = new List<ResourceTypeInfo>();
 			foreach (var info in ResourceTypes.AllTypes)
 			{
-				if (info.JarPaths.Count > 0)
-					available.Add(info);
+				if (info.JarPaths.Count == 0)
+					continue;
+
+				// 带文件后缀过滤器的类型：只有当 jar 中确实存在匹配文件时才显示
+				if (!string.IsNullOrEmpty(info.FileSuffix) && CountResourceTypeFiles(info.Type) == 0)
+					continue;
+
+				available.Add(info);
 			}
 			return available;
 		}
@@ -216,10 +223,19 @@ namespace mre.model
 		/// </summary>
 		public void ExtractResourceType(ResourceType type, Settings settings, string subDirPrefix)
 		{
+			ResourceTypeInfo info = ResourceTypes.GetInfo(type);
 			List<string> jarPaths = ResourceTypes.GetJarPathsForType(type);
 			foreach (string jarPath in jarPaths)
 			{
-				ExtractPath(jarPath, settings, subDirPrefix);
+				if (info != null && !string.IsNullOrEmpty(info.FileSuffix))
+				{
+					// 文件级精确提取：只取该目录下匹配后缀的文件
+					ExtractFilteredFiles(jarPath, info.FileSuffix, settings, subDirPrefix);
+				}
+				else
+				{
+					ExtractPath(jarPath, settings, subDirPrefix);
+				}
 			}
 		}
 
@@ -229,6 +245,8 @@ namespace mre.model
 		public int CountResourceTypeFiles(ResourceType type)
 		{
 			if (AllEntries == null) return 0;
+			ResourceTypeInfo info = ResourceTypes.GetInfo(type);
+			string fileSuffix = info != null ? info.FileSuffix : null;
 			List<string> jarPaths = ResourceTypes.GetJarPathsForType(type);
 			int count = 0;
 			foreach (string jarPath in jarPaths)
@@ -237,8 +255,11 @@ namespace mre.model
 				foreach (string entry in AllEntries)
 				{
 					string normalized = entry.Replace('\\', '/');
-					if (normalized.StartsWith(prefix + "/") || normalized.StartsWith(prefix))
-						count++;
+					if (!normalized.StartsWith(prefix + "/") && !normalized.StartsWith(prefix))
+						continue;
+					if (!string.IsNullOrEmpty(fileSuffix) && !normalized.EndsWith(fileSuffix, StringComparison.OrdinalIgnoreCase))
+						continue;
+					count++;
 				}
 			}
 			return count;
@@ -249,6 +270,39 @@ namespace mre.model
 			foreach (string path in paths)
 			{
 				ExtractPath(path, settings, null);
+			}
+		}
+
+		/// <summary>
+		/// 文件级精确提取：从 jar 中只提取指定目录前缀下、匹配后缀的文件（用于 .mcmeta 等场景）。
+		/// 使用 ZipArchive 逐条提取，弥补 `jar -xvf` 只能按整目录提取的局限。
+		/// </summary>
+		private void ExtractFilteredFiles(string jarPathPrefix, string fileSuffix, Settings settings, string subDirPrefix)
+		{
+			string outputDir = settings.GetEffectiveOutputPath() + "\\" + Name;
+			if (!string.IsNullOrEmpty(subDirPrefix))
+				outputDir = settings.GetEffectiveOutputPath() + "\\" + subDirPrefix + "\\" + Name;
+
+			string prefix = jarPathPrefix.Replace('\\', '/').TrimEnd('/');
+
+			using (var archive = ZipFile.OpenRead(Path))
+			{
+				foreach (var entry in archive.Entries)
+				{
+					// 跳过目录条目
+					if (string.IsNullOrEmpty(entry.Name))
+						continue;
+
+					string fullName = entry.FullName.Replace('\\', '/');
+					if (!fullName.StartsWith(prefix + "/") || !fullName.EndsWith(fileSuffix, StringComparison.OrdinalIgnoreCase))
+						continue;
+
+					string destPath = System.IO.Path.Combine(outputDir, entry.FullName.Replace('/', '\\'));
+					string destDir = System.IO.Path.GetDirectoryName(destPath);
+					if (!string.IsNullOrEmpty(destDir))
+						Directory.CreateDirectory(destDir);
+					entry.ExtractToFile(destPath, true);
+				}
 			}
 		}
 
