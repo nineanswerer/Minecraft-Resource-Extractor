@@ -559,6 +559,9 @@ namespace mre.controller
 						dlg.Close();
 						dlg.Dispose();
 						view.Enabled = true;
+						// 弹窗关闭后把主窗体拉回前台，避免被 Windows 留在所有窗口最底层
+						view.Activate();
+						view.BringToFront();
 
 						FillResourceTypes();
 
@@ -591,6 +594,7 @@ namespace mre.controller
 		private void AggregateResourceTypesFromJars(List<string> jarPaths, FrmProgress dlg)
 		{
 			var resultLists = new ConcurrentBag<List<string>>();
+			var resultSizes = new ConcurrentBag<Dictionary<string, long>>();
 			int scanned = 0;
 			int failed = 0;
 			int total = jarPaths.Count;
@@ -605,7 +609,11 @@ namespace mre.controller
 					var jar = new JarFile(jarPath);
 					jar.ListJarEntriesFast();
 					if (jar.AllEntries != null && jar.AllEntries.Count > 0)
-						resultLists.Add(jar.AllEntries); // 整个列表一次添加，减少同步开销
+					{
+						resultLists.Add(jar.AllEntries);
+						if (jar.EntrySizes != null)
+							resultSizes.Add(jar.EntrySizes);
+					} // 整个列表一次添加，减少同步开销
 				}
 				catch
 				{
@@ -628,6 +636,12 @@ namespace mre.controller
 			var allEntriesList = new List<string>(resultLists.Sum(l => l.Count));
 			foreach (var list in resultLists)
 				allEntriesList.AddRange(list);
+
+			// 合并条目大小（同名路径冲突时后者覆盖，估算允许轻微误差）
+			var allSizes = new Dictionary<string, long>(StringComparer.OrdinalIgnoreCase);
+			foreach (var sizeMap in resultSizes)
+				foreach (var kv in sizeMap)
+					allSizes[kv.Key] = kv.Value;
 			if (failed > 0)
 				view.Log(failed + " 个 jar 文件无法读取，已跳过", "Orange");
 
@@ -651,6 +665,7 @@ namespace mre.controller
 				{
 					target.Jar = new JarFile(jarPaths[0]);
 					target.Jar.SetAllEntries(allEntriesList);
+					target.Jar.SetEntrySizes(allSizes);
 				}
 				catch { }
 			}
@@ -775,19 +790,43 @@ namespace mre.controller
 				? view.cmbPackFormat.SelectedItem.ToString()
 				: PackMcMeta.DefaultVersion;
 			int totalJars = _currentBatchJars.Count;
-			int totalSteps = totalJars * selectedTypes.Count;
+
+			// 预处理：把选中的类型展开成「(前缀, 后缀, 子目录)」提取请求，供每个 jar 单次开包一次遍历完成
+			var extractRequests = new List<ExtractRequest>();
+			foreach (ResourceType type in selectedTypes)
+			{
+				var typeInfo = ResourceTypes.GetInfo(type);
+				string suffix = typeInfo != null ? typeInfo.FileSuffix : null;
+				string typeName = groupByType ? ResourceTypes.GetDisplayName(type) : null;
+				foreach (string jarPath in ResourceTypes.GetJarPathsForType(type))
+					extractRequests.Add(new ExtractRequest { Prefix = jarPath, FileSuffix = suffix, SubDirPrefix = typeName });
+			}
 
 			view.SwitchUiLock(4);
 			view.pgbProgress.Style = ProgressBarStyle.Blocks;
-			view.SetProgressRange(0, Math.Max(1, totalSteps));
+			view.SetProgressRange(0, 1); // 占位，实际范围在后台统计完文件总数后设置
 
 			Task.Run(() =>
 			{
 				try
 				{
-					int currentStep = 0;
+					int totalExtracted = 0;
 					int successCount = 0;
 					var conflicts = new Dictionary<string, List<string>>();
+
+					// 预先统计「会实际提取」的文件写入次数（只读中央目录，不解压），
+					// 与 ExtractMultiple 的匹配/去重逻辑一致，确保进度条精确到 100%。
+					int totalFiles = 0;
+					Parallel.ForEach(_currentBatchJars, jarPath =>
+					{
+						try
+						{
+							var jar = new JarFile(jarPath);
+							Interlocked.Add(ref totalFiles, jar.CountExtractedFiles(extractRequests, settings));
+						}
+						catch { }
+					});
+					view.SetProgressRange(0, Math.Max(1, totalFiles));
 
 					for (int i = 0; i < _currentBatchJars.Count; i++)
 					{
@@ -798,12 +837,21 @@ namespace mre.controller
 						try
 						{
 							var jar = new JarFile(jarPath);
-							jar.ListJarEntriesFast();
 
-							// 检测冲突
-							if (jar.AllEntries != null)
+							// 单次开包：一次遍历提取全部选中类型，并回填 AllEntries 供冲突检测复用
+							// 通过回调按文件粒度推进进度（delta 累加到全局计数）
+							int prevThisJar = 0;
+							jar.ExtractMultiple(extractRequests, settings, thisJarDone =>
 							{
-								foreach (string entry in jar.AllEntries)
+								totalExtracted += (thisJarDone - prevThisJar);
+								prevThisJar = thisJarDone;
+								view.SetProgress(totalExtracted);
+							});
+
+							// 检测冲突（只统计本次实际提取出的资产路径，避免 META-INF/.class 等未提取文件误报）
+							if (jar.ExtractedEntries != null)
+							{
+								foreach (string entry in jar.ExtractedEntries)
 								{
 									string normalized = entry.Replace('\\', '/');
 									if (!conflicts.ContainsKey(normalized))
@@ -811,21 +859,6 @@ namespace mre.controller
 									if (!conflicts[normalized].Contains(jarName))
 										conflicts[normalized].Add(jarName);
 								}
-							}
-
-							// 按选中的资源类型提取
-							foreach (ResourceType type in selectedTypes)
-							{
-								string typeName = ResourceTypes.GetDisplayName(type);
-								view.Status("正在提取: " + jarName + " → " + typeName + " (" + (currentStep + 1) + "/" + totalSteps + ")");
-
-								if (groupByType)
-									jar.ExtractResourceType(type, settings, typeName);
-								else
-									jar.ExtractResourceType(type, settings);
-
-								currentStep++;
-								view.SetProgress(currentStep);
 							}
 
 							successCount++;
@@ -838,10 +871,6 @@ namespace mre.controller
 						}
 						catch (System.Exception ex)
 						{
-							// 跳过已失败的类型，但仍更新进度
-							currentStep += selectedTypes.Count;
-							if (currentStep > totalSteps) currentStep = totalSteps;
-							view.SetProgress(currentStep);
 							view.Log("  ✗ " + jarName + " 提取失败: " + ex.Message, "DarkRed");
 						}
 					}
@@ -873,7 +902,7 @@ namespace mre.controller
 							TotalJars = totalJars,
 							SuccessfulJars = successCount,
 							FailedJars = totalJars - successCount,
-							TotalAssetsExtracted = currentStep,
+							TotalAssetsExtracted = totalExtracted,
 							ConflictCount = actualConflicts.Count,
 							Conflicts = actualConflicts
 						};
@@ -891,6 +920,7 @@ namespace mre.controller
 
 					view.Status("批量提取完成！");
 
+					view.SetProgress(totalExtracted); // 顶满进度条（正常应等于 totalFiles）
 					System.Diagnostics.Process.Start("explorer.exe", outputDir);
 				}
 				catch (Exception ex)
@@ -902,7 +932,6 @@ namespace mre.controller
 					view.BeginInvoke((MethodInvoker)(() =>
 					{
 						view.pgbProgress.Style = ProgressBarStyle.Continuous;
-						view.pgbProgress.Value = 0;
 						view.SwitchUiLock(4);
 						view.Cursor = System.Windows.Forms.Cursors.Default;
 					}));

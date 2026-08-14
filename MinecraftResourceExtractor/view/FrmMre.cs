@@ -21,6 +21,7 @@ namespace mre.view
 		private SplitContainer splitHelp;
 		private TreeView treeDirectory;
 		private Label lblFileCountPreview;
+		private bool _previewPending;
 		private Dictionary<string, SortedSet<string>> _treeSubdirs;
 		private Dictionary<string, SortedSet<string>> _treeFiles;
 
@@ -39,6 +40,11 @@ namespace mre.view
 		public FrmMre()
 		{
 			InitializeComponent();
+
+			// btnConfirm4 垂直位置由 LayoutStep4Controls 动态控制；
+			// 去掉 Bottom 锚点，避免 grbStep4 高度变化时 Anchor 重定位把按钮移出可视区（批量模式按钮"消失"）
+			btnConfirm4.Anchor = AnchorStyles.Top | AnchorStyles.Right;
+
 			InitializeModsPanel();
 			InitializeOutputOptions();
 			InitializePackMcMetaOptions();
@@ -334,8 +340,9 @@ namespace mre.view
 		/// </summary>
 		public void BuildDirectoryTreeIndex(JarFile jar)
 		{
-			var subdirs = new Dictionary<string, SortedSet<string>>();
-			var files = new Dictionary<string, SortedSet<string>>();
+			// 用 Ordinal 比较器：路径为纯 ASCII，省去文化敏感性比较，构建海量目录树更快
+			var subdirs = new Dictionary<string, SortedSet<string>>(StringComparer.Ordinal);
+			var files = new Dictionary<string, SortedSet<string>>(StringComparer.Ordinal);
 
 			if (jar?.AllEntries != null)
 			{
@@ -356,7 +363,7 @@ namespace mre.view
 							// 文件
 							if (!files.TryGetValue(accumulated, out var fileSet))
 							{
-								fileSet = new SortedSet<string>();
+								fileSet = new SortedSet<string>(StringComparer.Ordinal);
 								files[accumulated] = fileSet;
 							}
 							fileSet.Add(part);
@@ -367,7 +374,7 @@ namespace mre.view
 							string childDir = accumulated + part + "/";
 							if (!subdirs.TryGetValue(accumulated, out var dirSet))
 							{
-								dirSet = new SortedSet<string>();
+								dirSet = new SortedSet<string>(StringComparer.Ordinal);
 								subdirs[accumulated] = dirSet;
 							}
 							dirSet.Add(childDir);
@@ -586,10 +593,16 @@ namespace mre.view
 			};
 			grbStep4.Controls.Add(lblFileCountPreview);
 
-			// 勾选状态改变时实时刷新预计文件数（延迟到状态真正更新后）
+			// 勾选状态改变时实时刷新预计文件数（去抖：全选会触发大量 ItemCheck，合并为一次计算，避免卡死）
 			chkResourceTypes.ItemCheck += (s, e) =>
 			{
-				BeginInvoke((MethodInvoker)UpdateFileCountPreview);
+				if (_previewPending) return;
+				_previewPending = true;
+				BeginInvoke((MethodInvoker)(() =>
+				{
+					_previewPending = false;
+					UpdateFileCountPreview();
+				}));
 			};
 		}
 
@@ -608,18 +621,47 @@ namespace mre.view
 			}
 
 			int total = 0;
+			long totalBytes = 0;
 			for (int i = 0; i < chkResourceTypes.Items.Count; i++)
 			{
 				if (chkResourceTypes.GetItemChecked(i))
 				{
 					var type = (ResourceType)chkResourceTypes.Items[i];
-					total += jar.CountResourceTypeFiles(type);
+					int count;
+					long bytes;
+					jar.CountResourceTypeSummary(type, out count, out bytes);
+					total += count;
+					totalBytes += bytes;
 				}
 			}
 
-			lblFileCountPreview.Text = total > 0
-				? "预计提取 " + total + " 个文件"
-				: "请勾选要提取的资源类型";
+			if (total <= 0)
+			{
+				lblFileCountPreview.Text = "请勾选要提取的资源类型";
+				return;
+			}
+
+			string text = "预计提取 " + total + " 个文件";
+			if (totalBytes > 0)
+				text += "，约 " + FormatBytes(totalBytes);
+			lblFileCountPreview.Text = text;
+		}
+
+		/// <summary>
+		/// 把字节数格式化为可读大小（B/KB/MB/GB）
+		/// </summary>
+		private static string FormatBytes(long bytes)
+		{
+			if (bytes <= 0) return "0 B";
+			string[] units = { "B", "KB", "MB", "GB" };
+			double d = bytes;
+			int unit = 0;
+			while (d >= 1024 && unit < units.Length - 1)
+			{
+				d /= 1024;
+				unit++;
+			}
+			return d.ToString(unit == 0 ? "0" : "0.0") + " " + units[unit];
 		}
 
 		/// <summary>

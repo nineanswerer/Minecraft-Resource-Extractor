@@ -21,7 +21,8 @@ namespace mre.view
 			MinimizeBox = false;
 			StartPosition = FormStartPosition.CenterParent;
 			ShowInTaskbar = false;
-			TopMost = true;
+			// 注意：不设 TopMost。TopMost + 无模态 Show(owner) 关闭后会导致 owner 主窗体
+			// 被 Windows 压到所有窗口最底层。作为 owner 的子窗体本来就会显示在 owner 之上。
 			ClientSize = new Size(400, 100);
 			BackColor = Color.FromArgb(240, 244, 248);
 
