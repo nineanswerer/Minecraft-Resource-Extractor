@@ -55,6 +55,39 @@ namespace mre.model
 		}
 
 		/// <summary>
+		/// 读取指定条目（规范化 '/' 路径）的字节内容，供预览等场景按需读取单个文件。
+		/// 每次重新打开 zip（预览低频，不必缓存句柄）；失败返回 null。
+		/// </summary>
+		public byte[] ReadEntryBytes(string entryPath)
+		{
+			if (string.IsNullOrEmpty(entryPath)) return null;
+			string normalized = entryPath.Replace('\\', '/');
+			using (var archive = ZipFile.OpenRead(Path))
+			{
+				var entry = archive.GetEntry(normalized);
+				if (entry == null)
+				{
+					// 大小写不敏感兜底（zip 条目路径大小写可能不一致）
+					foreach (var e in archive.Entries)
+					{
+						if (string.Equals(e.FullName.Replace('\\', '/'), normalized, StringComparison.OrdinalIgnoreCase))
+						{
+							entry = e;
+							break;
+						}
+					}
+				}
+				if (entry == null) return null;
+				using (var s = entry.Open())
+				using (var ms = new MemoryStream())
+				{
+					s.CopyTo(ms);
+					return ms.ToArray();
+				}
+			}
+		}
+
+		/// <summary>
 		/// 快速列出 jar 文件中的所有条目（使用 ZipArchive，无需 Java 进程）
 		/// 比 ListJarFolders() 快 100 倍以上，适用于批量扫描
 		/// </summary>
@@ -293,6 +326,7 @@ namespace mre.model
 		{
 			ResourceTypeInfo info = ResourceTypes.GetInfo(type);
 			string fileSuffix = info != null ? info.FileSuffix : null;
+			bool directOnly = info != null && info.DirectChildrenOnly;
 			List<string> jarPaths = ResourceTypes.GetJarPathsForType(type);
 			foreach (string jarPath in jarPaths)
 			{
@@ -302,6 +336,8 @@ namespace mre.model
 					string normalized = entry.Replace('\\', '/');
 					if (!normalized.StartsWith(prefix + "/") && !normalized.StartsWith(prefix))
 						continue;
+					if (directOnly && normalized.IndexOf('/', prefix.Length + 1) >= 0)
+						continue; // 前缀之下还有更深子目录，非松散文件
 					if (!string.IsNullOrEmpty(fileSuffix) && !normalized.EndsWith(fileSuffix, StringComparison.OrdinalIgnoreCase))
 						continue;
 					yield return normalized;
@@ -363,7 +399,9 @@ namespace mre.model
 		public void ExtractMultiple(IList<ExtractRequest> requests, Settings settings, Action<int> onProgress = null)
 		{
 			string[] prefixes, suffixes, outputRoots;
-			PreprocessRequests(requests, settings, out prefixes, out suffixes, out outputRoots);
+			bool[] directOnly;
+			HashSet<string>[] fileNameFilters;
+			PreprocessRequests(requests, settings, out prefixes, out suffixes, out outputRoots, out directOnly, out fileNameFilters);
 			int n = prefixes.Length;
 
 			AllEntries = new List<string>();
@@ -395,13 +433,19 @@ namespace mre.model
 					string fullName = entry.FullName.Replace('\\', '/');
 					AllEntries.Add(fullName);
 					EntrySizes[fullName] = entry.Length;
+					int slashIdx = fullName.LastIndexOf('/');
+					string entryFileName = slashIdx >= 0 ? fullName.Substring(slashIdx + 1) : fullName;
 
 					for (int i = 0; i < n; i++)
 					{
 						if (!fullName.StartsWith(prefixes[i] + "/"))
 							continue;
+						if (directOnly[i] && fullName.IndexOf('/', prefixes[i].Length + 1) >= 0)
+							continue; // 前缀之下还有更深子目录，非松散文件
 						if (suffixes[i] != null && !fullName.EndsWith(suffixes[i], StringComparison.OrdinalIgnoreCase))
 							continue;
+						if (fileNameFilters[i] != null && !fileNameFilters[i].Contains(entryFileName))
+							continue; // 文件名白名单未命中，跳过（语言包提纯只保留指定语言的 json）
 
 						string destPath = System.IO.Path.Combine(outputRoots[i], entry.FullName.Replace('/', '\\'));
 						if (!written.Add(destPath))
@@ -430,7 +474,9 @@ namespace mre.model
 		public int CountExtractedFiles(IList<ExtractRequest> requests, Settings settings)
 		{
 			string[] prefixes, suffixes, outputRoots;
-			PreprocessRequests(requests, settings, out prefixes, out suffixes, out outputRoots);
+			bool[] directOnly;
+			HashSet<string>[] fileNameFilters;
+			PreprocessRequests(requests, settings, out prefixes, out suffixes, out outputRoots, out directOnly, out fileNameFilters);
 			int n = prefixes.Length;
 			if (n == 0) return 0;
 
@@ -442,10 +488,14 @@ namespace mre.model
 				{
 					if (string.IsNullOrEmpty(entry.Name)) continue;
 					string fullName = entry.FullName.Replace('\\', '/');
+					int slashIdx = fullName.LastIndexOf('/');
+					string entryFileName = slashIdx >= 0 ? fullName.Substring(slashIdx + 1) : fullName;
 					for (int i = 0; i < n; i++)
 					{
 						if (!fullName.StartsWith(prefixes[i] + "/")) continue;
+						if (directOnly[i] && fullName.IndexOf('/', prefixes[i].Length + 1) >= 0) continue; // 松散文件：前缀下还有子目录则跳过
 						if (suffixes[i] != null && !fullName.EndsWith(suffixes[i], StringComparison.OrdinalIgnoreCase)) continue;
+						if (fileNameFilters[i] != null && !fileNameFilters[i].Contains(entryFileName)) continue; // 文件名白名单未命中，跳过
 						string destPath = System.IO.Path.Combine(outputRoots[i], entry.FullName.Replace('/', '\\'));
 						if (written.Add(destPath)) count++;
 					}
@@ -459,17 +509,23 @@ namespace mre.model
 		/// 确保两者的匹配与去重逻辑完全一致。
 		/// </summary>
 		private void PreprocessRequests(IList<ExtractRequest> requests, Settings settings,
-			out string[] prefixes, out string[] suffixes, out string[] outputRoots)
+			out string[] prefixes, out string[] suffixes, out string[] outputRoots, out bool[] directOnly, out HashSet<string>[] fileNameFilters)
 		{
 			int n = requests == null ? 0 : requests.Count;
 			prefixes = new string[n];
 			suffixes = new string[n];
 			outputRoots = new string[n];
+			directOnly = new bool[n];
+			fileNameFilters = new HashSet<string>[n];
 			string baseOut = settings.GetEffectiveOutputPath() + "\\" + Name;
 			for (int i = 0; i < n; i++)
 			{
 				prefixes[i] = requests[i].Prefix.Replace('\\', '/').TrimEnd('/');
 				suffixes[i] = string.IsNullOrEmpty(requests[i].FileSuffix) ? null : requests[i].FileSuffix;
+				directOnly[i] = requests[i].DirectChildrenOnly;
+				// 文件名白名单转为大小写不敏感的 HashSet，供提取/计数时 O(1) 命中判断
+				if (requests[i].FileNameWhitelist != null && requests[i].FileNameWhitelist.Count > 0)
+					fileNameFilters[i] = new HashSet<string>(requests[i].FileNameWhitelist, StringComparer.OrdinalIgnoreCase);
 				outputRoots[i] = string.IsNullOrEmpty(requests[i].SubDirPrefix)
 					? baseOut
 					: settings.GetEffectiveOutputPath() + "\\" + requests[i].SubDirPrefix + "\\" + Name;
@@ -488,5 +544,9 @@ namespace mre.model
 		public string FileSuffix;
 		/// <summary>可选输出子目录前缀（按类型分类时用），null/空 = 直接输出到 jar 目录</summary>
 		public string SubDirPrefix;
+		/// <summary>松散文件：仅匹配前缀的直接子文件（无更深子目录），用于命名空间根目录的 icon.png 等</summary>
+		public bool DirectChildrenOnly;
+		/// <summary>可选文件名白名单（精确文件名，如 {"en_us.json","zh_cn.json"}），只提取文件名命中的文件；null/空 = 不按文件名过滤</summary>
+		public List<string> FileNameWhitelist;
 	}
 }

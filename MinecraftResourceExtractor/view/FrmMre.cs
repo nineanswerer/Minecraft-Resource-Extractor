@@ -7,6 +7,8 @@ using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.IO;
 using System.Linq;
+using System.Text;
+using System.Threading.Tasks;
 using System.Windows.Forms;
 
 namespace mre.view
@@ -18,12 +20,32 @@ namespace mre.view
 		public CheckBox chkGeneratePackMcMeta;  // 生成 pack.mcmeta
 		public ComboBox cmbPackFormat;          // 目标 MC 版本
 		private Label lblPackFormat;
+		private Label lblLangDiff;          // 未翻译对比标签
+		private Label lblLangArrow;         // 未翻译对比箭头（基准 → 目标）
+		private ComboBox cmbBaseLang;        // 基准语言
+		private ComboBox cmbTargetLang;      // 目标语言
+		private Button btnFindMissingKeys;   // 查找未翻译文本
+		private Button btnExtractLangPack;   // 语言包提纯
+	private Button btnBuildChinesePack;  // 生成汉化资源包
 		private SplitContainer splitHelp;
 		private TreeView treeDirectory;
 		private Label lblFileCountPreview;
 		private bool _previewPending;
 		private Dictionary<string, SortedSet<string>> _treeSubdirs;
 		private Dictionary<string, SortedSet<string>> _treeFiles;
+
+		// 文件预览（单 jar 模式）：日志区 Tab 化 + 图片/文本预览 + 右键外部打开
+		private TabControl tabRight;
+		private TabPage tpLog;
+		private TabPage tpPreview;
+		private PictureBox picPreview;
+		private TextBox txtPreview;
+		private Label lblPreviewHint;
+		private ContextMenuStrip cmsTree;
+		private bool _isBatchMode;
+		private Panel pnlLeftScroll;
+		private SplitContainer splitMain;
+		private int _grb4ContentHeight = 250;
 
 		// 现代配色方案
 		private static readonly Color C_PRIMARY = Color.FromArgb(74, 144, 217);
@@ -37,6 +59,49 @@ namespace mre.view
 		private static readonly Color C_BORDER = Color.FromArgb(208, 215, 222);
 		private static readonly Color C_GB_HEADER = Color.FromArgb(30, 58, 95);
 
+		// 未翻译对比的常用语言候选（可手动输入任意语言代码，如 zh_cn、lzh、en_ud）
+		private static readonly string[] CommonLanguages =
+		{
+			"en_us", "zh_cn", "zh_tw", "zh_hk", "ja_jp", "ko_kr",
+			"fr_fr", "de_de", "ru_ru", "es_es", "pt_br", "it_it",
+			"lzh", "en_ud", "en_pt"
+		};
+
+		// 语言代码 → 中文介绍（下拉框逐项内联显示用）
+		private static readonly Dictionary<string, string> LanguageDescriptions =
+			new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+		{
+			{ "en_us", "英语（美国）" },
+			{ "en_gb", "英语（英国）" },
+			{ "zh_cn", "简体中文" },
+			{ "zh_tw", "繁体中文（台湾）" },
+			{ "zh_hk", "繁体中文（香港）" },
+			{ "ja_jp", "日语" },
+			{ "ko_kr", "韩语" },
+			{ "fr_fr", "法语（法国）" },
+			{ "fr_ca", "法语（加拿大）" },
+			{ "de_de", "德语" },
+			{ "ru_ru", "俄语" },
+			{ "es_es", "西班牙语" },
+			{ "es_mx", "西班牙语（墨西哥）" },
+			{ "pt_br", "葡萄牙语（巴西）" },
+			{ "pt_pt", "葡萄牙语（葡萄牙）" },
+			{ "it_it", "意大利语" },
+			{ "nl_nl", "荷兰语" },
+			{ "pl_pl", "波兰语" },
+			{ "sv_se", "瑞典语" },
+			{ "cs_cz", "捷克语" },
+			{ "hu_hu", "匈牙利语" },
+			{ "tr_tr", "土耳其语" },
+			{ "uk_ua", "乌克兰语" },
+			{ "vi_vn", "越南语" },
+			{ "th_th", "泰语" },
+			{ "id_id", "印度尼西亚语" },
+			{ "lzh", "文言文（Minecraft 官方「文言」语言）" },
+			{ "en_ud", "倒置英语（Minecraft 彩蛋语言，字母上下颠倒）" },
+			{ "en_pt", "海盗英语（Minecraft 彩蛋语言）" },
+		};
+
 		public FrmMre()
 		{
 			InitializeComponent();
@@ -48,11 +113,13 @@ namespace mre.view
 			InitializeModsPanel();
 			InitializeOutputOptions();
 			InitializePackMcMetaOptions();
+			InitializeLangDiffControls();
 			InitializeSelectAllLinks();
 			InitializeDirectoryTree();
 			InitializeFileCountPreview();
 			InitializeDragDrop();
 			ApplyModernStyle();
+			InitializeMainLayout();
 			controller = new Controller(this);
 			if (controller.GetJavaPath() == null)
 			{
@@ -65,6 +132,7 @@ namespace mre.view
 			if (!string.IsNullOrEmpty(controller.settings.LastMcPath))
 				txtPath.Text = controller.settings.LastMcPath;
 			StepsController.Step1(this);
+			LayoutStep4Controls();
 			Log("请选择是要从官方 Minecraft 版本提取资源，还是从单独的 jar 文件提取。");
 		}
 
@@ -101,6 +169,9 @@ namespace mre.view
 		StyleButton(btnBrowseOutput, Color.FromArgb(108, 117, 125));  // 辅助 - 灰色
 		StyleButton(btnBrowseModsDir, C_PRIMARY);   // 浏览 - 蓝色
 		StyleButton(btnConfirm2Mods, C_SUCCESS);    // 扫描 - 绿色
+		StyleButton(btnFindMissingKeys, C_PRIMARY);   // 查找未翻译文本 - 蓝色
+		StyleButton(btnExtractLangPack, C_PRIMARY);   // 语言包提纯 - 蓝色
+		StyleButton(btnBuildChinesePack, C_PRIMARY); // 生成汉化资源包 - 蓝色
 
 			// --- 帮助面板 ---
 			grbHelp.BackColor = C_SURFACE;
@@ -305,7 +376,11 @@ namespace mre.view
 			treeDirectory.AfterSelect += (s, e) =>
 			{
 				if (e.Node?.Tag is string path && !string.IsNullOrEmpty(path))
+				{
 					Status(path.EndsWith("/") ? "目录: " + path : "文件: " + path);
+					if (!path.EndsWith("/"))
+						ShowPreview(path);
+				}
 			};
 
 			// 懒加载：展开目录时才加载其子项（避免一次加载几十万节点）
@@ -319,19 +394,240 @@ namespace mre.view
 				}
 			};
 
-			// 重新组织 grbHelp 控件
+			// 右键菜单：文件节点「用外部程序打开」
+			cmsTree = new ContextMenuStrip();
+			var miOpen = new ToolStripMenuItem("用外部程序打开");
+			miOpen.Click += (s, e) =>
+			{
+				var node = treeDirectory.SelectedNode;
+				if (node?.Tag is string p && !string.IsNullOrEmpty(p) && !p.EndsWith("/"))
+					OpenExternal(p);
+			};
+			cmsTree.Items.Add(miOpen);
+			treeDirectory.ContextMenuStrip = cmsTree;
+			// 右键时先选中被点中的节点，再弹菜单
+			treeDirectory.NodeMouseClick += (s, e) =>
+			{
+				if (e.Button == MouseButtons.Right)
+					treeDirectory.SelectedNode = e.Node;
+			};
+
+			// 重新组织 grbHelp 控件：Panel2 由日志 RichTextBox 改为 TabControl（日志 | 预览）
 			grbHelp.Controls.Remove(rtbHelp);
 
 			splitHelp.Panel1.Controls.Add(treeDirectory);
 			splitHelp.Panel1.Controls.Add(lblTreeTitle);
 
-			splitHelp.Panel2.Controls.Add(rtbHelp);
+			tabRight = new TabControl
+			{
+				Dock = DockStyle.Fill
+			};
+			tpLog = new TabPage("日志");
+			tpPreview = new TabPage("预览");
+			tabRight.TabPages.Add(tpLog);
+			tabRight.TabPages.Add(tpPreview);
+
+			tpLog.Controls.Add(rtbHelp);
 			rtbHelp.Dock = DockStyle.Fill;
+
+			BuildPreviewPanel();
+
+			splitHelp.Panel2.Controls.Add(tabRight);
 
 			grbHelp.Controls.Add(splitHelp);
 
 			// 更新帮助面板样式
 			grbHelp.BackColor = C_SURFACE;
+		}
+
+		/// <summary>
+		/// 构造「预览」Tab 面板：图片 PictureBox、文本 TextBox、占位提示 Label 三者叠放，按需切换显示
+		/// </summary>
+		private void BuildPreviewPanel()
+		{
+			lblPreviewHint = new Label
+			{
+				Dock = DockStyle.Fill,
+				Text = "点击左侧目录树中的文件进行预览",
+				TextAlign = ContentAlignment.MiddleCenter,
+				ForeColor = C_TEXT_SEC,
+				BackColor = Color.FromArgb(248, 250, 252)
+			};
+
+			picPreview = new PictureBox
+			{
+				Dock = DockStyle.Fill,
+				SizeMode = PictureBoxSizeMode.Zoom,
+				BackColor = Color.FromArgb(248, 250, 252),
+				Visible = false
+			};
+
+			txtPreview = new TextBox
+			{
+				Dock = DockStyle.Fill,
+				Multiline = true,
+				ReadOnly = true,
+				ScrollBars = ScrollBars.Both,
+				WordWrap = false,
+				BorderStyle = BorderStyle.None,
+				BackColor = Color.FromArgb(248, 250, 252),
+				Font = new Font("Consolas", 9F),
+				Visible = false
+			};
+
+			tpPreview.Controls.Add(picPreview);
+			tpPreview.Controls.Add(txtPreview);
+			tpPreview.Controls.Add(lblPreviewHint);
+		}
+
+		/// <summary>
+		/// 点击文件节点时按扩展名分发预览；批量模式（合并视图无 jar 来源）暂不支持
+		/// </summary>
+		private void ShowPreview(string filePath)
+		{
+			if (_isBatchMode)
+			{
+				ShowHint("批量模式预览开发中");
+				return;
+			}
+
+			string ext = Path.GetExtension(filePath).ToLowerInvariant();
+			if (IsImage(ext))
+				PreviewImage(filePath);
+			else if (IsText(ext))
+				PreviewText(filePath);
+			else
+				ShowHint("该文件类型暂不支持预览\n(" + (string.IsNullOrEmpty(ext) ? "无扩展名" : ext) + ")");
+		}
+
+		/// <summary>
+		/// 在预览 Tab 显示占位提示文字
+		/// </summary>
+		private void ShowHint(string msg)
+		{
+			if (lblPreviewHint == null) return;
+			lblPreviewHint.Text = msg;
+			picPreview.Visible = false;
+			txtPreview.Visible = false;
+			lblPreviewHint.Visible = true;
+			lblPreviewHint.BringToFront();
+			if (tabRight != null && tpPreview != null)
+				tabRight.SelectedTab = tpPreview;
+		}
+
+		/// <summary>
+		/// 后台读取图片条目并在预览 Tab 显示
+		/// </summary>
+		private void PreviewImage(string filePath)
+		{
+			ShowHint("加载中...");
+			Task.Run(() =>
+			{
+				byte[] data = controller?.target?.Jar?.ReadEntryBytes(filePath);
+				if (data == null)
+				{
+					BeginInvoke((MethodInvoker)(() => ShowHint("无法读取该文件")));
+					return;
+				}
+
+				Image img;
+				try
+				{
+					using (var ms = new MemoryStream(data))
+					using (var src = Image.FromStream(ms))
+					{
+						img = new Bitmap(src); // 独立副本，脱离流生命周期
+					}
+				}
+				catch
+				{
+					BeginInvoke((MethodInvoker)(() => ShowHint("无法解析该图片")));
+					return;
+				}
+
+				BeginInvoke((MethodInvoker)(() =>
+				{
+					var old = picPreview.Image;
+					picPreview.Image = img;
+					if (old != null) old.Dispose();
+					picPreview.Visible = true;
+					txtPreview.Visible = false;
+					lblPreviewHint.Visible = false;
+					picPreview.BringToFront();
+				}));
+			});
+		}
+
+		/// <summary>
+		/// 后台读取文本条目（UTF-8）并在预览 Tab 显示
+		/// </summary>
+		private void PreviewText(string filePath)
+		{
+			ShowHint("加载中...");
+			Task.Run(() =>
+			{
+				byte[] data = controller?.target?.Jar?.ReadEntryBytes(filePath);
+				if (data == null)
+				{
+					BeginInvoke((MethodInvoker)(() => ShowHint("无法读取该文件")));
+					return;
+				}
+				string text = Encoding.UTF8.GetString(data);
+				BeginInvoke((MethodInvoker)(() =>
+				{
+					txtPreview.Text = text;
+					txtPreview.SelectionStart = 0;
+					txtPreview.ScrollToCaret();
+					picPreview.Visible = false;
+					lblPreviewHint.Visible = false;
+					txtPreview.Visible = true;
+					txtPreview.BringToFront();
+				}));
+			});
+		}
+
+		/// <summary>
+		/// 把文件解压到临时目录并用系统关联程序打开（喂给 Photoshop/Blockbench 等）
+		/// </summary>
+		private void OpenExternal(string filePath)
+		{
+			var jar = controller?.target?.Jar;
+			if (jar == null) return;
+			byte[] data = jar.ReadEntryBytes(filePath);
+			if (data == null)
+			{
+				Status("无法读取文件：" + filePath);
+				return;
+			}
+			try
+			{
+				string tmpRoot = Path.Combine(Path.GetTempPath(), "mre_preview", jar.Name);
+				string tmpFile = Path.Combine(tmpRoot, filePath.Replace('/', '\\'));
+				Directory.CreateDirectory(Path.GetDirectoryName(tmpFile));
+				File.WriteAllBytes(tmpFile, data);
+				Process.Start(tmpFile);
+			}
+			catch (Exception ex)
+			{
+				Status("打开失败：" + ex.Message);
+			}
+		}
+
+		/// <summary>
+		/// 是否可预览的图片扩展名
+		/// </summary>
+		private static bool IsImage(string ext)
+		{
+			return ext == ".png" || ext == ".jpg" || ext == ".jpeg" || ext == ".gif" || ext == ".bmp";
+		}
+
+		/// <summary>
+		/// 是否可预览的文本扩展名
+		/// </summary>
+		private static bool IsText(string ext)
+		{
+			return ext == ".json" || ext == ".mcmeta" || ext == ".txt"
+				|| ext == ".properties" || ext == ".lang" || ext == ".cfg" || ext == ".toml";
 		}
 
 		/// <summary>
@@ -525,6 +821,127 @@ namespace mre.view
 			cmbPackFormat.Items.AddRange(PackMcMeta.SupportedVersions);
 			cmbPackFormat.Text = PackMcMeta.DefaultVersion;
 			grbStep4.Controls.Add(cmbPackFormat);
+		}
+
+		/// <summary>
+		/// 初始化未翻译文本对比入口（标签 + 基准/目标语言下拉框 + 查找按钮，添加到 grbStep4）
+		/// </summary>
+		private void InitializeLangDiffControls()
+		{
+			lblLangDiff = new Label
+			{
+				Text = "语言处理：",
+				Location = new System.Drawing.Point(6, 252),
+				AutoSize = true,
+				ForeColor = C_TEXT_SEC
+			};
+			grbStep4.Controls.Add(lblLangDiff);
+
+			cmbBaseLang = new ComboBox
+			{
+				Location = new System.Drawing.Point(88, 248),
+				Width = 80,
+				DropDownStyle = ComboBoxStyle.DropDown,
+				DrawMode = DrawMode.OwnerDrawFixed,
+				ItemHeight = 20,
+				DropDownWidth = 190
+			};
+			cmbBaseLang.Items.AddRange(CommonLanguages);
+			cmbBaseLang.Text = "en_us";
+			cmbBaseLang.DrawItem += DrawLangItem;
+			toolTip.SetToolTip(cmbBaseLang, "基准语言：对比的源语言（默认 en_us 英语）。下拉项已内联显示语言介绍。");
+			grbStep4.Controls.Add(cmbBaseLang);
+
+			lblLangArrow = new Label
+			{
+				Text = "→",
+				Location = new System.Drawing.Point(172, 252),
+				AutoSize = true,
+				ForeColor = C_TEXT_SEC
+			};
+			grbStep4.Controls.Add(lblLangArrow);
+
+			cmbTargetLang = new ComboBox
+			{
+				Location = new System.Drawing.Point(190, 248),
+				Width = 80,
+				DropDownStyle = ComboBoxStyle.DropDown,
+				DrawMode = DrawMode.OwnerDrawFixed,
+				ItemHeight = 20,
+				DropDownWidth = 190
+			};
+			cmbTargetLang.Items.AddRange(CommonLanguages);
+			cmbTargetLang.Text = "zh_cn";
+			cmbTargetLang.DrawItem += DrawLangItem;
+			toolTip.SetToolTip(cmbTargetLang, "目标语言：对比的目标语言（默认 zh_cn 简体中文）。下拉项已内联显示语言介绍。");
+			grbStep4.Controls.Add(cmbTargetLang);
+
+			btnFindMissingKeys = new Button
+			{
+				Text = "查找未翻译文本",
+				Location = new System.Drawing.Point(276, 246),
+				Size = new System.Drawing.Size(120, 27)
+			};
+			btnFindMissingKeys.Click += (s, e) =>
+			{
+				if (controller == null) return;
+				controller.FindMissingKeys(cmbBaseLang.Text, cmbTargetLang.Text);
+			};
+			grbStep4.Controls.Add(btnFindMissingKeys);
+
+			btnExtractLangPack = new Button
+			{
+				Text = "语言包提纯",
+				Location = new System.Drawing.Point(276, 274),
+				Size = new System.Drawing.Size(120, 27)
+			};
+			btnExtractLangPack.Click += (s, e) =>
+			{
+				if (controller == null) return;
+				controller.ExtractLanguagePack(new List<string> { cmbBaseLang.Text, cmbTargetLang.Text });
+			};
+			toolTip.SetToolTip(btnExtractLangPack, "语言包提纯：只提取基准+目标语言的 lang 文件（如 en_us.json + zh_cn.json），按命名空间组织输出到「语言包」目录，供机翻 / 合成汉化资源包复用。");
+			grbStep4.Controls.Add(btnExtractLangPack);
+
+			btnBuildChinesePack = new Button
+			{
+				Text = "生成汉化资源包",
+				Location = new System.Drawing.Point(276, 302),
+				Size = new System.Drawing.Size(120, 27)
+			};
+			btnBuildChinesePack.Click += (s, e) =>
+			{
+				if (controller == null) return;
+				controller.GenerateResourcePack(cmbTargetLang.Text);
+			};
+			toolTip.SetToolTip(btnBuildChinesePack, "汉化资源包一键生成：把「语言包提纯」的产物按命名空间合并成目标语言译文，合成 pack.mcmeta + pack.png + 合并后的 lang，生成文件夹和 zip，可直接拖进 .minecraft/resourcepacks/。");
+			grbStep4.Controls.Add(btnBuildChinesePack);
+		}
+
+		/// <summary>
+		/// 语言下拉框逐项自绘：每个选项显示「代码 · 中文介绍」，让用户一眼看懂语言代码含义。
+		/// WinForms ComboBox 不支持原生「每个下拉项悬停 tooltip」，故用内联描述替代（比悬停更直观）。
+		/// </summary>
+		private void DrawLangItem(object sender, DrawItemEventArgs e)
+		{
+			var cmb = sender as ComboBox;
+			if (cmb == null || e.Index < 0)
+				return;
+
+			string code = cmb.Items[e.Index] as string;
+			if (string.IsNullOrEmpty(code))
+				return;
+
+			string text = code;
+			if (LanguageDescriptions.TryGetValue(code, out string desc))
+				text = code + "  ·  " + desc;
+
+			e.DrawBackground();
+			bool selected = (e.State & DrawItemState.Selected) == DrawItemState.Selected;
+			Color fg = selected ? Color.White : e.ForeColor;
+			TextRenderer.DrawText(e.Graphics, text, e.Font,
+				new System.Drawing.Point(e.Bounds.Left + 2, e.Bounds.Top + 1), fg);
+			e.DrawFocusRectangle();
 		}
 
 		/// <summary>
@@ -792,7 +1209,7 @@ namespace mre.view
 			pnlModsDir = new Panel
 			{
 				Location = new System.Drawing.Point(6, 19),
-				Size = new System.Drawing.Size(454, 52),
+				Size = new System.Drawing.Size(454, 23),
 				Visible = false
 			};
 
@@ -841,6 +1258,8 @@ namespace mre.view
 		/// </summary>
 		private void SetBatchModeUI(bool isBatch)
 		{
+			_isBatchMode = isBatch;
+
 			// grbStep2 控件切换
 			cmbVersions.Visible = !isBatch;
 			btnConfirm2.Visible = !isBatch;
@@ -1099,6 +1518,149 @@ namespace mre.view
 		}
 
 		/// <summary>
+		/// 主布局：用可拖动分隔条的 SplitContainer 取代固定 65/35 的 tlpMain。
+		/// 左面板装 4 个步骤框 + About（整体滚动），右面板放帮助/预览，分隔条可拖动调整左右宽度。
+		/// </summary>
+		private void InitializeMainLayout()
+		{
+			// 主水平分割：左侧步骤列 | 右侧帮助/预览
+			splitMain = new SplitContainer
+			{
+				Dock = DockStyle.Fill,
+				Orientation = Orientation.Vertical,
+				BackColor = C_BORDER,
+				SplitterWidth = 4,
+				FixedPanel = FixedPanel.None
+			};
+			// 先给足宽度再设 Panel1MinSize/Panel2MinSize：否则默认 150 宽下设置会抛
+			//「SplitterDistance 必须介于 Panel1MinSize 和 Width - Panel2MinSize 之间」
+			splitMain.Size = new System.Drawing.Size(ClientSize.Width, ClientSize.Height);
+			splitMain.Panel1MinSize = 300;
+			splitMain.Panel2MinSize = 220;
+
+			// 左侧滚动面板：装 4 个步骤框 + About，作为一个大模块整体滚动
+			pnlLeftScroll = new Panel
+			{
+				Dock = DockStyle.Fill,
+				AutoScroll = true,
+				BackColor = C_BG
+			};
+
+			// 把控件从 tlpMain 取出来重新分配
+			tlpMain.Controls.Remove(grbStep1);
+			tlpMain.Controls.Remove(grbStep2);
+			tlpMain.Controls.Remove(grbStep3);
+			tlpMain.Controls.Remove(grbStep4);
+			tlpMain.Controls.Remove(lnkAbout);
+			tlpMain.Controls.Remove(grbHelp);
+
+			pnlLeftScroll.Controls.Add(grbStep1);
+			pnlLeftScroll.Controls.Add(grbStep2);
+			pnlLeftScroll.Controls.Add(grbStep3);
+			pnlLeftScroll.Controls.Add(grbStep4);
+			pnlLeftScroll.Controls.Add(lnkAbout);
+
+			splitMain.Panel1.Controls.Add(pnlLeftScroll);
+			splitMain.Panel2.Controls.Add(grbHelp);
+
+			// 用 splitMain 替换 tlpMain（放到 Controls 索引 0，让 Dock=Fill 正确排在状态栏之后）
+			Controls.Remove(tlpMain);
+			Controls.Add(splitMain);
+			Controls.SetChildIndex(splitMain, 0);
+
+			// 左右面板外边距（与原 tlpMain 的 padding 一致）
+			splitMain.Panel1.Padding = new Padding(8, 8, 6, 8);
+			splitMain.Panel2.Padding = new Padding(6, 8, 8, 8);
+
+			// 各步骤框改为顶部堆叠、宽度随面板伸缩（不再由 tlpMain 行/停靠控制）
+			grbStep1.Dock = DockStyle.None;
+			grbStep2.Dock = DockStyle.None;
+			grbStep3.Dock = DockStyle.None;
+			grbStep4.Dock = DockStyle.None;
+			lnkAbout.Dock = DockStyle.None;
+
+			grbStep1.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
+			grbStep2.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
+			grbStep3.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
+			grbStep4.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
+			lnkAbout.Anchor = AnchorStyles.Top | AnchorStyles.Right;
+			lnkAbout.AutoSize = false;
+
+			// 清除 MinimumSize：否则面板尚未撑开时 SetBounds 宽度会被钳制回最小宽度，产生负的右锚定
+			// 边距，导致右对齐的「确认」按钮溢出面板只显示一半。
+			grbStep1.MinimumSize = new System.Drawing.Size(0, 0);
+			grbStep2.MinimumSize = new System.Drawing.Size(0, 0);
+			grbStep3.MinimumSize = new System.Drawing.Size(0, 0);
+			grbStep4.MinimumSize = new System.Drawing.Size(0, 0);
+
+			// 初始分隔条位置 ≈ 65%（与原左右比例一致）；待窗口完成布局后再设，避免宽度未定时报错
+			Load += (s, e) =>
+			{
+				if (splitMain == null || splitMain.IsDisposed || splitMain.Width <= 0)
+					return;
+				int dist = (int)(splitMain.Width * 0.65);
+				if (dist >= splitMain.Panel1MinSize
+					&& dist <= splitMain.Width - splitMain.Panel2MinSize - splitMain.SplitterWidth)
+					splitMain.SplitterDistance = dist;
+				// 面板此时已有真实宽度，重排左侧列，让各步骤框与右对齐按钮落在正确位置
+				LayoutLeftColumn();
+			};
+
+			LayoutLeftColumn();
+		}
+
+		/// <summary>
+		/// 布局左侧滚动面板内的各模块（步骤1~4 + About 顶部依次堆叠），并计算滚动范围与窗体高度。
+		/// </summary>
+		private void LayoutLeftColumn()
+		{
+			if (pnlLeftScroll == null) return;
+
+			int width = pnlLeftScroll.ClientSize.Width;
+			int gap = 8;
+
+			// 各步骤框高度 = 内容底 + 24（GroupBox 标题区 + 底部留白）。用实际内容底计算，
+			// 随 DPI/字体缩放自适应；之前硬编码 163/66/77 在高 DPI 下会裁掉底部按钮（如步骤1的「浏览」按钮）。
+			int grb1Bottom = btnLocateJar.Bottom;
+			int grb2Bottom = Math.Max(cmbVersions.Bottom, Math.Max(btnConfirm2.Bottom, pnlModsDir != null ? pnlModsDir.Bottom : 0));
+			int grb3Bottom = Math.Max(chkExtGroups.Bottom, btnConfirm3.Bottom);
+			grbStep1.SetBounds(0, 0, width, grb1Bottom + 24);
+			grbStep2.SetBounds(0, grbStep1.Bottom + gap, width, grb2Bottom + 24);
+			grbStep3.SetBounds(0, grbStep2.Bottom + gap, width, grb3Bottom + 24);
+			grbStep4.SetBounds(0, grbStep3.Bottom + gap, width, _grb4ContentHeight);
+
+			// 右对齐按钮显式留 6px 右边距（清除 MinimumSize 后锚点重算可能贴边，观感太紧）
+			btnConfirm2.Left = grbStep2.Width - btnConfirm2.Width - 6;
+			btnConfirm3.Left = grbStep3.Width - btnConfirm3.Width - 6;
+			btnBrowseOutput.Left = grbStep4.Width - btnBrowseOutput.Width - 6;
+			btnConfirm4.Left = grbStep4.Width - btnConfirm4.Width - 6;
+
+			lnkAbout.Size = new System.Drawing.Size(60, 20);
+			lnkAbout.Location = new System.Drawing.Point(width - lnkAbout.Width, grbStep4.Bottom + gap);
+
+			// 滚动范围 = 最底部内容 + 底部留白（超出可视区即出现垂直滚动条）
+			pnlLeftScroll.AutoScrollMinSize = new System.Drawing.Size(0, lnkAbout.Bottom + 8);
+
+			// 窗体固定最小尺寸，允许用户手动缩小窗口（缩小后靠左侧滚动访问下方控件）
+			MinimumSize = new System.Drawing.Size(700, 600);
+
+			// 窗体尽量撑到刚好放下左侧全部内容，但不超过屏幕工作区高度；超出部分靠左侧滚动
+			// 窗体高度 = 左侧内容高 + title(32) + statusStrip(22) + 左面板上下 padding(16)
+			int totalLeftHeight = lnkAbout.Bottom + 8;
+			int neededFormHeight = totalLeftHeight + 70;
+			if (neededFormHeight < 600) neededFormHeight = 600;
+
+			int maxFormHeight = Screen.PrimaryScreen.WorkingArea.Height;
+			Screen scr = Screen.FromControl(this);
+			if (scr != null) maxFormHeight = scr.WorkingArea.Height;
+			if (neededFormHeight > maxFormHeight)
+				neededFormHeight = maxFormHeight;
+
+			if (Height < neededFormHeight)
+				Height = neededFormHeight;
+		}
+
+		/// <summary>
 		/// 根据 chkResourceTypes 的实际高度动态调整步骤4中下方控件的位置
 		/// </summary>
 		public void LayoutStep4Controls()
@@ -1141,20 +1703,27 @@ namespace mre.view
 				}
 			}
 
+			// 语言处理入口（未翻译对比 + 语言包提纯，共用基准/目标语言下拉框）
+			if (lblLangDiff != null && cmbBaseLang != null && cmbTargetLang != null && btnFindMissingKeys != null)
+			{
+				lblLangDiff.Top = y + 3;
+				cmbBaseLang.Top = y;
+				if (lblLangArrow != null) lblLangArrow.Top = y + 3;
+				cmbTargetLang.Top = y;
+				btnFindMissingKeys.Top = y - 1;
+				// 「语言包提纯」「生成汉化资源包」放在下面两行、与「查找未翻译文本」左对齐，避免和右对齐的「确认」按钮重叠
+				if (btnExtractLangPack != null)
+					btnExtractLangPack.Top = btnFindMissingKeys.Bottom + 4;
+				if (btnBuildChinesePack != null)
+					btnBuildChinesePack.Top = btnExtractLangPack.Bottom + 4;
+				y = (btnBuildChinesePack != null ? btnBuildChinesePack.Bottom : (btnExtractLangPack != null ? btnExtractLangPack.Bottom : cmbBaseLang.Bottom)) + 10;
+			}
+
 			btnConfirm4.Top = y;
 
-			// 动态调整 grbStep4 的最小高度以适应内容
-			int neededGrb4Height = btnConfirm4.Bottom + 10;
-			grbStep4.MinimumSize = new System.Drawing.Size(280, neededGrb4Height);
-
-			// 动态调整窗体的最小高度，确保确认按钮不被遮挡
-			// tlpMain 各行的总高度: row0(150) + row1(58) + row2(70) + row4(24) + padding(12) + statusStrip(22) ≈ 336
-			int neededClientHeight = 336 + neededGrb4Height;
-			int neededFormHeight = neededClientHeight + 32; // title bar 补偿
-			if (neededFormHeight < 580) neededFormHeight = 580;
-			MinimumSize = new System.Drawing.Size(700, neededFormHeight);
-			if (Height < neededFormHeight)
-				Height = neededFormHeight;
+			// 步骤4 高度取内容总高（含 GroupBox 标题区 + 底部留白），并重排整个左侧滚动列
+			_grb4ContentHeight = btnConfirm4.Bottom + 24;
+			LayoutLeftColumn();
 		}
 
 		private void FrmMre_FormClosed(object sender, FormClosedEventArgs e)

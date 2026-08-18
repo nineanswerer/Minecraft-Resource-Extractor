@@ -183,6 +183,7 @@ namespace mre.controller
 		/// </summary>
 		public void LoadJarFile(string filePath)
 		{
+			_batchMode = false;
 			target = new Target();
 			target.Jar = new JarFile(filePath);
 			view.txtPath.Text = filePath;
@@ -320,7 +321,8 @@ namespace mre.controller
 		public void ExtractSelectedResources(List<ResourceType> types, List<string> folders)
 		{
 			view.SwitchUiLock(4);
-			view.pgbProgress.Style = ProgressBarStyle.Marquee;
+			view.pgbProgress.Style = ProgressBarStyle.Blocks;
+			view.SetProgressRange(0, 1); // 占位，实际范围在统计完文件总数后设置
 
 			// 在 UI 线程读取 pack.mcmeta 生成选项（后台线程只用副本，避免跨线程访问控件）
 			bool generatePack = view.chkGeneratePackMcMeta != null && view.chkGeneratePackMcMeta.Checked;
@@ -328,28 +330,33 @@ namespace mre.controller
 				? view.cmbPackFormat.SelectedItem.ToString()
 				: PackMcMeta.DefaultVersion;
 
+			// 预处理：把选中的类型和文件夹统一展开成「(前缀, 后缀)」提取请求，
+			// 让单 jar 也走 ExtractMultiple 单次开包 + 精确进度（与批量模式一致）
+			var extractRequests = new List<ExtractRequest>();
+			if (types != null)
+			{
+				foreach (ResourceType type in types)
+					extractRequests.AddRange(ResourceTypes.BuildExtractRequests(type, false));
+			}
+			if (folders != null)
+			{
+				foreach (string folder in folders)
+					extractRequests.Add(new ExtractRequest { Prefix = folder, FileSuffix = null, SubDirPrefix = null });
+			}
+
 			Task.Run(() =>
 			{
 				try
 				{
-					if (types != null && types.Count > 0)
-					{
-						foreach (ResourceType type in types)
-						{
-							string displayName = ResourceTypes.GetDisplayName(type);
-							view.Status("正在提取 " + displayName + " ...");
-							target.Jar.ExtractResourceType(type, settings);
-						}
-					}
+					view.Status("正在提取...");
 
-					if (folders != null && folders.Count > 0)
-					{
-						foreach (string folder in folders)
-						{
-							view.Status("正在从 jar 中提取文件夹 " + folder + " ...");
-							target.Jar.ExtractJarFolder(folder, settings);
-						}
-					}
+					// 预统计实际会写出的文件数作为进度分母（与 ExtractMultiple 匹配/去重逻辑一致）
+					int totalFiles = target.Jar.CountExtractedFiles(extractRequests, settings);
+					view.SetProgressRange(0, Math.Max(1, totalFiles));
+
+					// 单次开包一次遍历提取全部选中内容，按文件粒度推进进度；
+					// ExtractMultiple 末尾会回调最终计数，进度自然顶满 100%
+					target.Jar.ExtractMultiple(extractRequests, settings, done => view.SetProgress(done));
 
 					// 生成 pack.mcmeta（可选，让输出目录成为可用资源包）
 					if (generatePack)
@@ -370,7 +377,6 @@ namespace mre.controller
 					view.BeginInvoke((MethodInvoker)(() =>
 					{
 						view.pgbProgress.Style = ProgressBarStyle.Continuous;
-						view.pgbProgress.Value = 0;
 						view.SwitchUiLock(4);
 						view.Cursor = Cursors.Default;
 						view.Status("提取完成");
@@ -525,6 +531,7 @@ namespace mre.controller
 			}
 
 			_currentBatchJars = jarPaths;
+			_batchMode = true;
 
 			// 弹出进度窗口
 			var dlg = new FrmProgress("正在加载 Mod 资源");
@@ -772,6 +779,8 @@ namespace mre.controller
 
 		private string _currentBatchDir;
 		private List<string> _currentBatchJars;
+		/// <summary>当前是否批量模式（true=批量加载一组 jar；false=单个 jar）。供未翻译对比等场景判断 jar 来源。</summary>
+		private bool _batchMode;
 
 		/// <summary>
 		/// 按选中的资源类型执行批量提取（后台线程，避免 UI 卡死）
@@ -794,13 +803,7 @@ namespace mre.controller
 			// 预处理：把选中的类型展开成「(前缀, 后缀, 子目录)」提取请求，供每个 jar 单次开包一次遍历完成
 			var extractRequests = new List<ExtractRequest>();
 			foreach (ResourceType type in selectedTypes)
-			{
-				var typeInfo = ResourceTypes.GetInfo(type);
-				string suffix = typeInfo != null ? typeInfo.FileSuffix : null;
-				string typeName = groupByType ? ResourceTypes.GetDisplayName(type) : null;
-				foreach (string jarPath in ResourceTypes.GetJarPathsForType(type))
-					extractRequests.Add(new ExtractRequest { Prefix = jarPath, FileSuffix = suffix, SubDirPrefix = typeName });
-			}
+				extractRequests.AddRange(ResourceTypes.BuildExtractRequests(type, groupByType));
 
 			view.SwitchUiLock(4);
 			view.pgbProgress.Style = ProgressBarStyle.Blocks;
@@ -934,6 +937,286 @@ namespace mre.controller
 						view.pgbProgress.Style = ProgressBarStyle.Continuous;
 						view.SwitchUiLock(4);
 						view.Cursor = System.Windows.Forms.Cursors.Default;
+					}));
+				}
+			});
+		}
+
+		/// <summary>
+		/// 一键语言包提纯：从当前加载的 jar（批量=全部 mod，单 jar=当前 jar）中，
+		/// 只提取指定语言（如 en_us、zh_cn）的 assets/<ns>/lang/<lang>.json，按命名空间组织输出到「语言包」目录，
+		/// 供机翻 / 合成汉化资源包复用。
+		/// </summary>
+		public void ExtractLanguagePack(List<string> languages)
+		{
+			List<string> jarPaths;
+			if (_batchMode && _currentBatchJars != null && _currentBatchJars.Count > 0)
+				jarPaths = _currentBatchJars;
+			else if (target?.Jar?.Path != null)
+				jarPaths = new List<string> { target.Jar.Path };
+			else
+			{
+				view.Log("没有可提取的 jar 文件，请先加载 jar 或扫描 Mods 目录。", "DarkRed");
+				return;
+			}
+
+			// 去重 + 去除空值（基准语言与目标语言可能重复）
+			var langList = (languages ?? new List<string>())
+				.Where(l => !string.IsNullOrEmpty(l))
+				.Distinct(StringComparer.OrdinalIgnoreCase)
+				.ToList();
+
+			var extractRequests = ResourceTypes.BuildLangPackRequests(langList);
+			if (extractRequests.Count == 0)
+			{
+				view.Log("这些 jar 中没有找到 lang 语言文件。", "DarkRed");
+				return;
+			}
+
+			view.SwitchUiLock(4);
+			view.pgbProgress.Style = ProgressBarStyle.Blocks;
+			view.SetProgressRange(0, 1); // 占位，实际范围在后台统计完文件总数后设置
+			view.Log("开始提纯语言包（" + string.Join(", ", langList) + "），共 " + jarPaths.Count + " 个 jar ...");
+
+			Task.Run(() =>
+			{
+				try
+				{
+					int totalExtracted = 0;
+					int successCount = 0;
+
+					// 预先统计会实际提取的文件数（只读中央目录，不解压），使进度条精确到 100%
+					int totalFiles = 0;
+					Parallel.ForEach(jarPaths, jarPath =>
+					{
+						try
+						{
+							var jar = new JarFile(jarPath);
+							Interlocked.Add(ref totalFiles, jar.CountExtractedFiles(extractRequests, settings));
+						}
+						catch { }
+					});
+					view.SetProgressRange(0, Math.Max(1, totalFiles));
+
+					for (int i = 0; i < jarPaths.Count; i++)
+					{
+						string jarPath = jarPaths[i];
+						string jarName = System.IO.Path.GetFileName(jarPath);
+						view.Status("正在提纯: " + jarName + " (" + (i + 1) + "/" + jarPaths.Count + ") ...");
+
+						try
+						{
+							var jar = new JarFile(jarPath);
+							int prevThisJar = 0;
+							jar.ExtractMultiple(extractRequests, settings, thisJarDone =>
+							{
+								totalExtracted += (thisJarDone - prevThisJar);
+								prevThisJar = thisJarDone;
+								view.SetProgress(totalExtracted);
+							});
+							successCount++;
+							view.Log("  ✓ " + jarName + " 语言包提取完成", "DarkGreen");
+						}
+						catch (System.Exception ex)
+						{
+							view.Log("  ✗ " + jarName + " 提取失败: " + ex.Message, "DarkRed");
+						}
+					}
+
+					string outDir = settings.GetEffectiveOutputPath() + "\\语言包";
+					view.Log("═══════════════════════════════════════");
+					view.Log("  语言包提纯完成", "DarkGreen");
+					view.Log("═══════════════════════════════════════");
+					view.Log("  语言: " + string.Join(", ", langList));
+					view.Log("  成功: " + successCount + "/" + jarPaths.Count + " 个 jar");
+					view.Log("  提取文件: " + totalExtracted + " 个");
+					view.Log("  输出目录: " + outDir);
+					view.Log("═══════════════════════════════════════");
+					view.Status("语言包提纯完成！");
+
+					view.SetProgress(totalExtracted); // 顶满进度条
+					System.Diagnostics.Process.Start("explorer.exe", outDir);
+				}
+				catch (Exception ex)
+				{
+					view.Log("语言包提纯发生错误: " + ex.Message, "DarkRed");
+				}
+				finally
+				{
+					view.BeginInvoke((MethodInvoker)(() =>
+					{
+						view.pgbProgress.Style = ProgressBarStyle.Continuous;
+						view.SwitchUiLock(4);
+						view.Cursor = System.Windows.Forms.Cursors.Default;
+					}));
+				}
+			});
+		}
+
+		/// <summary>
+		/// 汉化资源包一键生成：读取「语言包」目录（一键语言包提纯的产物），按命名空间合并目标语言，
+		/// 合成一个可直接拖进 .minecraft/resourcepacks/ 的资源包（pack.mcmeta + pack.png + 合并后的 lang），并打 zip。
+		/// </summary>
+		public void GenerateResourcePack(string targetLang)
+		{
+			string sourceDir = settings.GetEffectiveOutputPath() + "\\语言包";
+			if (!Directory.Exists(sourceDir))
+			{
+				view.Log("「语言包」目录不存在，请先执行「语言包提纯」。", "DarkRed");
+				return;
+			}
+
+			string lang = string.IsNullOrEmpty(targetLang) ? "zh_cn" : targetLang;
+
+			// 在 UI 线程读取 pack.mcmeta 版本下拉框（后台线程只用副本，避免跨线程访问控件）
+			string versionHint = (view.cmbPackFormat != null && view.cmbPackFormat.SelectedItem != null)
+				? view.cmbPackFormat.SelectedItem.ToString()
+				: PackMcMeta.DefaultVersion;
+
+			view.SwitchUiLock(4);
+			view.pgbProgress.Style = ProgressBarStyle.Blocks;
+			view.SetProgressRange(0, 1);
+			view.Log("开始生成汉化资源包（目标语言 " + lang + "）...");
+
+			Task.Run(() =>
+			{
+				try
+				{
+					view.SetProgress(0);
+
+					// 自动检测 MC 版本：从「语言包」子目录（jar 名）取最频繁版本，回退下拉框/默认
+					string detected = null;
+					try
+					{
+						var jarNames = Directory.GetDirectories(sourceDir).Select(d => Path.GetFileName(d));
+						detected = ResourcePackBuilder.DetectVersion(jarNames);
+					}
+					catch { }
+					string packVersion = detected ?? versionHint;
+
+					string outputDir = settings.GetEffectiveOutputPath() + "\\汉化资源包";
+					var result = ResourcePackBuilder.Build(sourceDir, lang, outputDir, packVersion, "MRE 汉化资源包（" + lang + "）");
+
+					view.SetProgress(1);
+
+					// 打 zip（zip 内容即资源包根，pack.mcmeta 在 zip 根部）
+					string zipPath = settings.GetEffectiveOutputPath() + "\\汉化资源包.zip";
+					if (File.Exists(zipPath))
+						File.Delete(zipPath);
+					System.IO.Compression.ZipFile.CreateFromDirectory(outputDir, zipPath);
+
+					view.Log("═══════════════════════════════════════");
+					view.Log("  汉化资源包生成完成", "DarkGreen");
+					view.Log("═══════════════════════════════════════");
+					view.Log("  目标语言: " + lang);
+					view.Log("  命名空间: " + result.NamespaceCount + " 个");
+					view.Log("  读入 lang 文件: " + result.FileCount + " 个");
+					view.Log("  合并 key: " + result.KeyCount + " 个");
+					if (result.ConflictCount > 0)
+						view.Log("  跨 mod 同名 key 冲突: " + result.ConflictCount + " 次（后加载覆盖）", "Orange");
+					view.Log("  pack.mcmeta 版本: " + PackMcMeta.DescribeFormat(result.Version) + (detected != null ? "（自动检测）" : ""));
+					view.Log("  资源包目录: " + outputDir);
+					view.Log("  zip 包: " + zipPath);
+					view.Log("  可直接把 zip 或文件夹丢进 .minecraft/resourcepacks/");
+					view.Log("═══════════════════════════════════════");
+					view.Status("汉化资源包生成完成！");
+
+					System.Diagnostics.Process.Start("explorer.exe", "/select," + zipPath);
+				}
+				catch (Exception ex)
+				{
+					view.Log("汉化资源包生成发生错误: " + ex.Message, "DarkRed");
+				}
+				finally
+				{
+					view.BeginInvoke((MethodInvoker)(() =>
+					{
+						view.pgbProgress.Style = ProgressBarStyle.Continuous;
+						view.SwitchUiLock(4);
+						view.Cursor = Cursors.Default;
+					}));
+				}
+			});
+		}
+
+		/// <summary>
+		/// 查找未翻译文本：对比基准语言与目标语言的 lang json，导出「缺失 key + 照抄英文」的 CSV/JSON 报告。
+		/// 后台线程扫描，进度通过 onProgress 回传；批量模式扫全部 jar，单 jar 模式扫当前 jar。
+		/// </summary>
+		public void FindMissingKeys(string baseLang, string targetLang)
+		{
+			List<string> jarPaths;
+			if (_batchMode && _currentBatchJars != null && _currentBatchJars.Count > 0)
+				jarPaths = _currentBatchJars;
+			else if (target?.Jar?.Path != null)
+				jarPaths = new List<string> { target.Jar.Path };
+			else
+			{
+				view.Log("没有可对比的 jar 文件，请先加载 jar 或扫描 Mods 目录。", "DarkRed");
+				return;
+			}
+
+			view.SwitchUiLock(4);
+			view.pgbProgress.Style = ProgressBarStyle.Blocks;
+			view.SetProgressRange(0, Math.Max(1, jarPaths.Count));
+			view.Log("开始对比未翻译文本（" + baseLang + " → " + targetLang + "），共 " + jarPaths.Count + " 个 jar ...");
+
+			Task.Run(() =>
+			{
+				try
+				{
+					var result = LangDiff.FindMissingKeys(jarPaths, baseLang, targetLang,
+						(done, total) =>
+						{
+							view.Status("正在对比 " + done + "/" + total + " 个 jar ...");
+							view.SetProgress(done);
+						});
+					var entries = result.Entries;
+
+					string outDir = settings.GetEffectiveOutputPath();
+					Directory.CreateDirectory(outDir);
+					string csvPath = Path.Combine(outDir, "missing_keys_" + baseLang + "_to_" + targetLang + ".csv");
+					string jsonPath = Path.Combine(outDir, "missing_keys_" + baseLang + "_to_" + targetLang + ".json");
+					LangDiff.WriteCsv(csvPath, entries);
+					LangDiff.WriteJson(jsonPath, entries);
+
+					int missing = entries.Count(e => e.Status == "missing");
+					int copied = entries.Count(e => e.Status == "copied");
+					int maybe = entries.Count(e => e.Status == "maybe");
+					view.Log("═══════════════════════════════════════");
+					view.Log("  未翻译文本对比完成", "DarkGreen");
+					view.Log("═══════════════════════════════════════");
+					view.Log("  扫描 jar 数: " + jarPaths.Count);
+					view.Log("  未翻译 key 总数: " + entries.Count, entries.Count > 0 ? "Orange" : "DarkGreen");
+					view.Log("    缺失 key: " + missing);
+					view.Log("    照抄英文: " + copied);
+					if (maybe > 0)
+						view.Log("    疑似缩写: " + maybe, "Orange");
+					if (result.CompletelyMissingJars.Count > 0)
+					{
+						view.Log("  完全未汉化的 mod (" + result.CompletelyMissingJars.Count + " 个):", "Orange");
+						int show = Math.Min(result.CompletelyMissingJars.Count, 15);
+						for (int i = 0; i < show; i++)
+							view.Log("    ✗ " + result.CompletelyMissingJars[i], "Orange");
+						if (result.CompletelyMissingJars.Count > 15)
+							view.Log("    ... 还有 " + (result.CompletelyMissingJars.Count - 15) + " 个");
+					}
+					view.Log("  CSV 报告: " + csvPath);
+					view.Log("  JSON 报告: " + jsonPath);
+					view.Log("═══════════════════════════════════════");
+					view.Status("未翻译文本对比完成！");
+				}
+				catch (Exception ex)
+				{
+					view.Log("未翻译文本对比发生错误: " + ex.Message, "DarkRed");
+				}
+				finally
+				{
+					view.BeginInvoke((MethodInvoker)(() =>
+					{
+						view.pgbProgress.Style = ProgressBarStyle.Continuous;
+						view.SwitchUiLock(4);
+						view.Cursor = Cursors.Default;
 					}));
 				}
 			});

@@ -21,6 +21,7 @@ namespace mre.model
 		动画配置,
 		附魔闪光,
 		工具纹理,
+		松散图片,
 	}
 
 	public class ResourceTypeInfo
@@ -33,6 +34,8 @@ namespace mre.model
 		public List<string> JarPaths { get; set; }
 		/// <summary>可选：文件后缀过滤器（如 ".mcmeta"）。设置后只提取匹配该后缀的文件，而非整个目录</summary>
 		public string FileSuffix { get; set; }
+		/// <summary>松散文件：仅匹配前缀的直接子文件（无更深子目录），如命名空间根目录的 icon.png</summary>
+		public bool DirectChildrenOnly { get; set; }
 		public string Description { get; set; }
 
 		public ResourceTypeInfo(ResourceType type, string displayName, string description, params string[] matchDirs)
@@ -65,6 +68,7 @@ namespace mre.model
 			new ResourceTypeInfo(ResourceType.动画配置, "动画配置", "动画定义（.mcmeta 文件）", "textures") { FileSuffix = ".mcmeta" },
 			new ResourceTypeInfo(ResourceType.附魔闪光, "附魔闪光", "附魔闪光等效果", "textures/glint", "glint"),
 			new ResourceTypeInfo(ResourceType.工具纹理, "工具纹理", "工具纹理", "textures/tools", "textures/trident"),
+			new ResourceTypeInfo(ResourceType.松散图片, "松散图片", "命名空间根目录的松散图片（icon.png 等）") { DirectChildrenOnly = true, FileSuffix = ".png" },
 		};
 
 		/// <summary>
@@ -78,6 +82,29 @@ namespace mre.model
 
 			foreach (var info in AllTypes)
 			{
+				if (info.DirectChildrenOnly)
+				{
+					// 松散文件类型：匹配 assets/<namespace>/ 下的直接图片文件（无更深子目录）
+					foreach (var entry in allEntries)
+					{
+						string normalized = entry.Replace('\\', '/');
+						if (!normalized.StartsWith("assets/"))
+							continue;
+						int nsEnd = normalized.IndexOf('/', "assets/".Length);
+						if (nsEnd < 0)
+							continue;
+						if (normalized.IndexOf('/', nsEnd + 1) >= 0)
+							continue; // 命名空间下还有更深子目录，非松散文件
+						if (string.IsNullOrEmpty(info.FileSuffix) || normalized.EndsWith(info.FileSuffix, System.StringComparison.OrdinalIgnoreCase))
+						{
+							string nsRoot = normalized.Substring(0, nsEnd + 1); // assets/<namespace>/
+							if (!info.JarPaths.Contains(nsRoot))
+								info.JarPaths.Add(nsRoot);
+						}
+					}
+					continue;
+				}
+
 				foreach (string matchDir in info.MatchDirs)
 				{
 					foreach (var entry in allEntries)
@@ -139,6 +166,45 @@ namespace mre.model
 					return info.DisplayName;
 			}
 			return type.ToString();
+		}
+
+		/// <summary>
+		/// 把一个资源类型展开成「(前缀, 后缀, 子目录)」提取请求列表，供单 jar 与批量提取共用。
+		/// 松散文件类型（DirectChildrenOnly）始终单独输出到以其类型名为名的子目录，避免与命名空间下其他资产混在一起。
+		/// </summary>
+		public static List<ExtractRequest> BuildExtractRequests(ResourceType type, bool groupByType)
+		{
+			var info = GetInfo(type);
+			string suffix = info != null ? info.FileSuffix : null;
+			bool directOnly = info != null && info.DirectChildrenOnly;
+			string subDir = (groupByType || directOnly) ? GetDisplayName(type) : null;
+			var requests = new List<ExtractRequest>();
+			foreach (string jarPath in GetJarPathsForType(type))
+				requests.Add(new ExtractRequest { Prefix = jarPath, FileSuffix = suffix, SubDirPrefix = subDir, DirectChildrenOnly = directOnly });
+			return requests;
+		}
+
+		/// <summary>
+		/// 构建「语言包提纯」提取请求：只提取每个命名空间 lang/ 目录下指定语言的 .json。
+		/// 复用「语言文件」类型已动态匹配好的 assets/<ns>/lang/ 前缀，文件名走白名单精确过滤，
+		/// 输出到「语言包/<jar名>/assets/<ns>/lang/<lang>.json」目录，供机翻 / 合成汉化资源包复用。
+		/// </summary>
+		public static List<ExtractRequest> BuildLangPackRequests(IList<string> languages)
+		{
+			var whitelist = new List<string>();
+			if (languages != null)
+			{
+				foreach (string lang in languages)
+					if (!string.IsNullOrEmpty(lang) && !whitelist.Contains(lang + ".json"))
+						whitelist.Add(lang + ".json");
+			}
+			if (whitelist.Count == 0)
+				whitelist.Add("en_us.json"); // 兜底：未指定语言时至少提取基准英文
+
+			var requests = new List<ExtractRequest>();
+			foreach (string jarPath in GetJarPathsForType(ResourceType.语言文件))
+				requests.Add(new ExtractRequest { Prefix = jarPath, FileNameWhitelist = whitelist, SubDirPrefix = "语言包" });
+			return requests;
 		}
 	}
 }

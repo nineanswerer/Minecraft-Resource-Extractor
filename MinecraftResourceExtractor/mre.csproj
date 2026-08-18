@@ -128,9 +128,11 @@
     <Compile Include="model\Assets.cs" />
     <Compile Include="model\BatchResult.cs" />
     <Compile Include="model\JarFile.cs" />
+    <Compile Include="model\LangDiff.cs" />
     <Compile Include="model\Minecraft.cs" />
     <Compile Include="model\PackMcMeta.cs" />
     <Compile Include="model\ModBatchExtractor.cs" />
+    <Compile Include="model\ResourcePackBuilder.cs" />
     <Compile Include="model\ResourceType.cs" />
     <Compile Include="model\Settings.cs" />
     <Compile Include="model\Target.cs" />
